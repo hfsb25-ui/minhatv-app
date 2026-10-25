@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
 
     private fun start() {
         lifecycleScope.launch {
-            val hasCache = Repo.vod.isNotEmpty() || Repo.live.isNotEmpty() || withContext(Dispatchers.IO) { Repo.loadCache() }
+            val hasCache = Repo.vod.isNotEmpty() || Repo.live.isNotEmpty() || withContext(Dispatchers.IO) { try { Repo.loadCache() } catch (e: Throwable) { false } }
             if (hasCache) {
                 withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {} }
                 showAccount(); show("home"); setLoading(null)
@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
                 if (err != null) { goLogin(err); return@launch }
                 try {
                     withContext(Dispatchers.IO) { Repo.fetchAll { m -> runOnUiThread { setLoading(m) } } }
-                } catch (e: Exception) { goLogin(e.message ?: "Não consegui baixar a lista."); return@launch }
+                } catch (e: Throwable) { goLogin(if (e is OutOfMemoryError) "A lista é grande demais para a memória deste aparelho." else (e.message ?: "Não consegui baixar a lista.")); return@launch }
                 setLoading("Buscando o que está em alta…")
                 withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {} }
                 showAccount(); show("home"); setLoading(null)
@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshInBackground() {
         lifecycleScope.launch {
             val ok = withContext(Dispatchers.IO) {
-                try { if (Repo.login() == null) { Repo.fetchAll { }; true } else false } catch (e: Exception) { false }
+                try { if (Repo.login() == null) { Repo.fetchAll { }; true } else false } catch (e: Throwable) { false }
             }
             if (ok) { showAccount(); refreshTrend() }
         }
