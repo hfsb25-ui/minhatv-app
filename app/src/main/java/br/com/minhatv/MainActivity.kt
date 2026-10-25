@@ -439,9 +439,10 @@ class MainActivity : ComponentActivity() {
         list.forEach { counts[it.cat] = (counts[it.cat] ?: 0) + 1 }
         data class Entry(val id: String, val name: String, val items: () -> List<Item>, val count: Int)
         val entries = ArrayList<Entry>()
-        entries.add(Entry("*", if (kind == Kind.LIVE) "Todos os canais" else "Todos", { list }, list.size))
+        // favoritos sempre no topo (no Ao vivo aparece mesmo vazio, para lembrar que existe)
         val favList = Lib.favs().mapNotNull { Repo.findKey(it) }.filter { it.kind == kind }
-        if (favList.isNotEmpty()) entries.add(Entry("fav", if (kind == Kind.LIVE) "★ Canais favoritos" else "★ Minha lista", { favList }, favList.size))
+        if (kind == Kind.LIVE || favList.isNotEmpty()) entries.add(Entry("fav", if (kind == Kind.LIVE) "★ Favoritos" else "★ Minha lista", { favList }, favList.size))
+        entries.add(Entry("*", if (kind == Kind.LIVE) "Todos os canais" else "Todos", { list }, list.size))
         if (kind != Kind.LIVE) {
             entries.add(Entry("new", "Adicionados recentemente", { Repo.recent(list).take(200) }, minOf(200, list.size)))
             Trend.forKind(kind).forEach { r -> entries.add(Entry("pf:" + r.plat.k, "Em alta · " + r.plat.n, { r.items }, r.items.size)) }
@@ -473,11 +474,16 @@ class MainActivity : ComponentActivity() {
         row.addView(right, llp(0, MATCH, 1f))
 
         var current = (getPreferences(Context.MODE_PRIVATE).getString("cat_$kind", "*") ?: "*")
+        // o Ao vivo abre direto nos favoritos quando existe algum
+        if (kind == Kind.LIVE && favList.isNotEmpty()) current = "fav"
+        if (kind == Kind.LIVE && favList.isEmpty() && current == "fav") current = "*"
         fun pick(id: String, focusGrid: Boolean) {
             current = id
             getPreferences(Context.MODE_PRIVATE).edit().putString("cat_$kind", id).apply()
             val en = entries.firstOrNull { it.id == id } ?: entries[0]
-            title.text = en.name
+            title.text = if (en.id == "fav" && en.count == 0)
+                (if (kind == Kind.LIVE) "★ Favoritos — nenhum ainda. Abra um canal, aperte OK e escolha Favoritar canal." else "★ Minha lista está vazia")
+            else en.name
             val items = en.items()
             grid.adapter = CardAdapter(items.map { it ->
                 Card(it, it.name, kind, onFocus = if (kind == Kind.LIVE) ({ showEpg(epg, it) }) else null) { open(it, if (kind == Kind.LIVE) items else null) }
