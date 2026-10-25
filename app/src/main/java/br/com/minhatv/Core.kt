@@ -318,7 +318,30 @@ object Repo {
         return (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { parseItem(k, it) } }
     }
 
+    /** lista embutida no app (lista.properties); vazio se não tiver */
+    private fun emb(v: String): String = try {
+        val b = android.util.Base64.decode(v, android.util.Base64.DEFAULT)
+        val k = "brtv-0f3a9".toByteArray()
+        String(ByteArray(b.size) { i -> (b[i].toInt() xor k[i % k.size].toInt()).toByte() }, Charsets.UTF_8)
+    } catch (e: Exception) { "" }
+
+    fun embedded(): Triple<String, String, String>? {
+        val s = emb(BuildConfig.L_SRV); val u = emb(BuildConfig.L_USR); val p = emb(BuildConfig.L_PWD)
+        if (s.isEmpty() || u.isEmpty() || p.isEmpty()) return null
+        return Triple(Xt.parseServer(s).first, u, p)
+    }
+
     fun hasCredentials(): Boolean {
+        // se o app tem lista embutida e nada foi salvo (ou era outra lista), usa a embutida
+        embedded()?.let { (s, u, p) ->
+            val saved = Store.str("cred")
+            if (saved == null || Store.str("emb_used") != "$s|$u") {
+                if (saved != null) { logoutCacheOnly(); Store.put("trend", null) }
+                Xt.server = s; Xt.user = u; Xt.pass = p
+                saveCredentials(); Store.put("emb_used", "$s|$u")
+                return true
+            }
+        }
         val c = Store.str("cred") ?: return false
         return try {
             val o = JSONObject(c)

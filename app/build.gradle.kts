@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +14,24 @@ android {
         applicationId = "br.com.minhatv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 8
+        versionName = "1.7"
+
+        // lista embutida (lista.properties na raiz do projeto), embaralhada para não ficar em texto aberto no APK
+        val lista = Properties().apply { rootProject.file("lista.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) } }
+        fun emb(v: String?): String {
+            val b = (v ?: "").trim().toByteArray(Charsets.UTF_8)
+            val k = "brtv-0f3a9".toByteArray()
+            val x = ByteArray(b.size) { i -> (b[i].toInt() xor k[i % k.size].toInt()).toByte() }
+            return Base64.getEncoder().encodeToString(x)
+        }
+        buildConfigField("String", "L_SRV", "\"" + emb(lista.getProperty("servidor")) + "\"")
+        buildConfigField("String", "L_USR", "\"" + emb(lista.getProperty("usuario")) + "\"")
+        buildConfigField("String", "L_PWD", "\"" + emb(lista.getProperty("senha")) + "\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
