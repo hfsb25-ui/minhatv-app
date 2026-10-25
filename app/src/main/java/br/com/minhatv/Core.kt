@@ -605,13 +605,13 @@ object Trend {
             }
             out.put(po)
         }
-        return JSONObject().put("t", System.currentTimeMillis()).put("plats", out)
+        return JSONObject().put("v", 2).put("t", System.currentTimeMillis()).put("plats", out)
     }
 
     /** usa o guardado; busca de novo se tiver mais de 6 horas (ou se force) */
     fun ensure(force: Boolean = false) {
         var raw = try { Store.str("trend")?.let { JSONObject(it) } } catch (e: Exception) { null }
-        val stale = raw == null || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
+        val stale = raw == null || raw.optInt("v") < 2 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
         if (force || stale) {
             try {
                 raw = fetchRaw()
@@ -630,7 +630,7 @@ object Trend {
 
     fun isStale(): Boolean {
         val raw = try { Store.str("trend")?.let { JSONObject(it) } } catch (e: Exception) { null }
-        return raw == null || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
+        return raw == null || raw.optInt("v") < 2 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
     }
 
     private class Idx(list: List<Item>) {
