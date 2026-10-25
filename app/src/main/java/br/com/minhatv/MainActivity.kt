@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // mostra o motivo se o app fechou sozinho da última vez
+        Store.str("crash")?.let { c -> showCrash(c); return }
         if (!Repo.hasCredentials()) { startActivity(Intent(this, LoginActivity::class.java)); finish(); return }
         buildShell()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -74,6 +76,19 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // ao voltar do player/detalhes: atualiza "continuar assistindo", favoritos e selos
         if (::content.isInitialized && shownVersion >= 0) refreshCurrent()
+    }
+
+    private fun showCrash(c: String) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(40), dp(28), dp(40), dp(28)); setBackgroundColor(C.bg) }
+        col.addView(text("O app fechou sozinho da última vez", 22f, Color.WHITE, true))
+        col.addView(text("Tire uma foto desta tela e mande para quem fez o app. Depois aperte Continuar.", 14f, C.tx2), llp(WRAP, WRAP).apply { topMargin = dp(8) })
+        val btn = button("Continuar", true) { Store.put("crash", null); recreate() }
+        col.addView(btn, llp(WRAP, WRAP).apply { topMargin = dp(14); bottomMargin = dp(14) })
+        val sv = android.widget.ScrollView(this)
+        sv.addView(text(c, 11f, C.tx3).apply { setTextIsSelectable(false) })
+        col.addView(sv, llp(MATCH, 0, 1f))
+        setContentView(col)
+        btn.requestFocus()
     }
 
     private fun start() {
@@ -234,13 +249,18 @@ class MainActivity : ComponentActivity() {
     private fun render(keepFocus: Boolean) {
         shownVersion = Repo.version
         content.removeAllViews()
-        when (tab) {
-            "home" -> content.addView(homeView())
-            "live" -> content.addView(browseView(Kind.LIVE))
-            "movie" -> content.addView(browseView(Kind.MOVIE))
-            "series" -> content.addView(browseView(Kind.SERIES))
-            "mylist" -> content.addView(myListView())
-            "search" -> content.addView(searchView())
+        try {
+            when (tab) {
+                "home" -> content.addView(homeView())
+                "live" -> content.addView(browseView(Kind.LIVE))
+                "movie" -> content.addView(browseView(Kind.MOVIE))
+                "series" -> content.addView(browseView(Kind.SERIES))
+                "mylist" -> content.addView(myListView())
+                "search" -> content.addView(searchView())
+            }
+        } catch (e: Throwable) {
+            content.removeAllViews()
+            content.addView(text("Erro ao montar a tela. Tire uma foto e mande para quem fez o app.\n\n" + android.util.Log.getStackTraceString(e).take(2500), 12f, C.tx2).apply { setPadding(dp(40), dp(20), dp(40), dp(20)) })
         }
     }
 

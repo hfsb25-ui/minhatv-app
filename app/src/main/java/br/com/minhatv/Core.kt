@@ -4,6 +4,14 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.util.JsonReader
+import android.util.JsonToken
+import android.util.JsonWriter
+import android.util.Log
+import java.io.BufferedInputStream
+import java.io.FileInputStream
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -19,6 +27,15 @@ class App : Application() {
         super.onCreate()
         instance = this
         Store.init(this)
+        // se o app fechar por erro, guarda o motivo para mostrar na próxima abertura
+        val def = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                getSharedPreferences("minhatv", Context.MODE_PRIVATE).edit()
+                    .putString("crash", Log.getStackTraceString(e).take(3500)).commit()
+            } catch (x: Throwable) {}
+            def?.uncaughtException(t, e)
+        }
     }
 
     companion object {
@@ -120,20 +137,103 @@ fun toArr(text: String): JSONArray? {
 
 private val yearInName = Regex("""\((19|20)\d{2}\)""")
 
-fun parseItem(kind: Kind, o: JSONObject): Item? {
-    val id = if (kind == Kind.SERIES) o.s("series_id") else o.s("stream_id")
+fun parseItem(kind: Kind, o: JSONObject): Item? = itemFrom(kind) { o.s(it) }
+
+fun itemFrom(kind: Kind, g: (String) -> String): Item? {
+    val id = if (kind == Kind.SERIES) g("series_id") else g("stream_id")
     if (id.isEmpty()) return null
-    val name = o.s("name").ifEmpty { o.s("title") }.ifEmpty { "Sem nome" }
-    val icon = if (kind == Kind.SERIES) o.s("cover") else o.s("stream_icon")
-    val r = o.s("rating").toDoubleOrNull() ?: o.s("rating_5based").toDoubleOrNull()?.times(2) ?: 0.0
-    val ys = o.s("year").ifEmpty { o.s("releaseDate") }.ifEmpty { o.s("release_date") }.take(4)
+    val name = g("name").ifEmpty { g("title") }.ifEmpty { "Sem nome" }
+    val icon = if (kind == Kind.SERIES) g("cover") else g("stream_icon")
+    val r = g("rating").toDoubleOrNull() ?: g("rating_5based").toDoubleOrNull()?.times(2) ?: 0.0
+    val ys = g("year").ifEmpty { g("releaseDate") }.ifEmpty { g("release_date") }.take(4)
     val year = ys.toIntOrNull() ?: yearInName.find(name)?.value?.filter { it.isDigit() }?.toIntOrNull() ?: 0
-    val added = o.s("added").ifEmpty { o.s("last_modified") }.toLongOrNull() ?: 0L
+    val added = g("added").ifEmpty { g("last_modified") }.toLongOrNull() ?: 0L
     return Item(
-        kind, id, name, icon, o.s("category_id"), r, year, added,
-        o.s("container_extension").ifEmpty { "mp4" }, o.s("num"), o.s("plot"),
-        o.s("tmdb").ifEmpty { o.s("tmdb_id") }, o.s("genre"), o.s("cast")
+        kind, id, name, icon, g("category_id"), r, year, added,
+        g("container_extension").ifEmpty { "mp4" }, g("num"), g("plot").take(600),
+        g("tmdb").ifEmpty { g("tmdb_id") }, g("genre"), g("cast").take(300)
     )
+}
+
+/* ---------- leitura em fluxo: listas enormes sem estourar a memória ---------- */
+private val FIELDS = hashSetOf(
+    "stream_id", "series_id", "name", "title", "stream_icon", "cover", "category_id", "rating", "rating_5based",
+    "year", "releaseDate", "release_date", "added", "last_modified", "container_extension", "num", "plot",
+    "tmdb", "tmdb_id", "genre", "cast"
+)
+
+private fun readObj(kind: Kind, r: JsonReader): Item? {
+    val m = HashMap<String, String>()
+    r.beginObject()
+    while (r.hasNext()) {
+        val n = r.nextName()
+        when (r.peek()) {
+            JsonToken.STRING, JsonToken.NUMBER -> { val v = r.nextString(); if (n in FIELDS) m[n] = v }
+            JsonToken.BOOLEAN -> r.nextBoolean()
+            JsonToken.NULL -> r.nextNull()
+            else -> r.skipValue()
+        }
+    }
+    r.endObject()
+    return itemFrom(kind) { m[it] ?: "" }
+}
+
+fun parseFile(kind: Kind, f: File): List<Item> {
+    val out = ArrayList<Item>()
+    if (!f.exists() || f.length() == 0L) return out
+    try {
+        JsonReader(InputStreamReader(BufferedInputStream(FileInputStream(f), 65536), Charsets.UTF_8)).use { r ->
+            r.isLenient = true
+            when (r.peek()) {
+                JsonToken.BEGIN_ARRAY -> {
+                    r.beginArray()
+                    while (r.hasNext()) {
+                        if (r.peek() == JsonToken.BEGIN_OBJECT) readObj(kind, r)?.let { out.add(it) } else r.skipValue()
+                    }
+                    r.endArray()
+                }
+                JsonToken.BEGIN_OBJECT -> {
+                    r.beginObject()
+                    while (r.hasNext()) {
+                        r.nextName()
+                        if (r.peek() == JsonToken.BEGIN_OBJECT) readObj(kind, r)?.let { out.add(it) } else r.skipValue()
+                    }
+                    r.endObject()
+                }
+                else -> {}
+            }
+        }
+    } catch (e: Throwable) {
+        // arquivo cortado: fica com o que deu para ler
+    }
+    return out
+}
+
+/** grava a lista no formato do Xtream (para reabrir rápido depois) */
+fun writeItems(f: File, items: List<Item>) {
+    try {
+        JsonWriter(OutputStreamWriter(f.outputStream().buffered(), Charsets.UTF_8)).use { w ->
+            w.beginArray()
+            items.forEach { it ->
+                w.beginObject()
+                w.name(if (it.kind == Kind.SERIES) "series_id" else "stream_id").value(it.id)
+                w.name("name").value(it.name)
+                w.name(if (it.kind == Kind.SERIES) "cover" else "stream_icon").value(it.icon)
+                w.name("category_id").value(it.cat)
+                if (it.rating > 0) w.name("rating").value(it.rating.toString())
+                if (it.year > 0) w.name("year").value(it.year.toString())
+                if (it.added > 0) w.name("added").value(it.added.toString())
+                w.name("container_extension").value(it.ext)
+                if (it.num.isNotEmpty()) w.name("num").value(it.num)
+                if (it.plot.isNotEmpty()) w.name("plot").value(it.plot)
+                if (it.tmdb.isNotEmpty()) w.name("tmdb").value(it.tmdb)
+                if (it.genre.isNotEmpty()) w.name("genre").value(it.genre)
+                if (it.cast.isNotEmpty()) w.name("cast").value(it.cast)
+                w.endObject()
+            }
+            w.endArray()
+        }
+    } catch (e: Exception) {}
 }
 
 /* ================= API Xtream ================= */
@@ -153,6 +253,18 @@ object Xt {
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw Exception("HTTP ${r.code}")
             return r.body?.string() ?: ""
+        }
+    }
+
+    /** baixa a resposta direto para um arquivo, sem guardar tudo na memória */
+    fun download(params: Map<String, String>, f: File) {
+        val q = (mapOf("username" to user, "password" to pass) + params).entries
+            .joinToString("&") { enc(it.key) + "=" + enc(it.value) }
+        val req = Request.Builder().url("$server/player_api.php?$q").header("User-Agent", UA).build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) throw Exception("HTTP ${r.code}")
+            val b = r.body ?: throw Exception("resposta vazia")
+            f.outputStream().use { out -> b.byteStream().copyTo(out, 64 * 1024) }
         }
     }
 
@@ -259,7 +371,7 @@ object Repo {
             }
         } catch (e: Exception) {}
         liveCats = cats(read("live_cats")); vodCats = cats(read("vod_cats")); serCats = cats(read("ser_cats"))
-        live = items(Kind.LIVE, read("live")); vod = items(Kind.MOVIE, read("vod")); series = items(Kind.SERIES, read("series"))
+        live = parseFile(Kind.LIVE, File(dir(), "live")); vod = parseFile(Kind.MOVIE, File(dir(), "vod")); series = parseFile(Kind.SERIES, File(dir(), "series"))
         if (live.isNotEmpty() || vod.isNotEmpty() || series.isNotEmpty()) { version++; return true }
         return false
     }
@@ -274,41 +386,41 @@ object Repo {
         val sc = safe { Xt.get(mapOf("action" to "get_series_categories")) }
         val nLiveCats = cats(lc); val nVodCats = cats(vc); val nSerCats = cats(sc)
         progress("Baixando canais…")
-        val (l, lt) = fetchList("get_live_streams", Kind.LIVE, nLiveCats, "canais", progress)
+        val l = fetchList("get_live_streams", Kind.LIVE, nLiveCats, "canais", "live", progress)
         progress("Baixando filmes…")
-        val (v, vt) = fetchList("get_vod_streams", Kind.MOVIE, nVodCats, "filmes", progress)
+        val v = fetchList("get_vod_streams", Kind.MOVIE, nVodCats, "filmes", "vod", progress)
         progress("Baixando séries…")
-        val (s, st) = fetchList("get_series", Kind.SERIES, nSerCats, "séries", progress)
+        val s = fetchList("get_series", Kind.SERIES, nSerCats, "séries", "series", progress)
         if (l.isEmpty() && v.isEmpty() && s.isEmpty()) throw Exception("O servidor não mandou nenhum canal, filme ou série.")
         liveCats = nLiveCats; vodCats = nVodCats; serCats = nSerCats
         live = l; vod = v; series = s
         version++
         lc?.let { write("live_cats", it) }; vc?.let { write("vod_cats", it) }; sc?.let { write("ser_cats", it) }
-        write("live", lt); write("vod", vt); write("series", st)
     }
 
     private fun safe(f: () -> String): String? = try { f() } catch (e: Exception) { null }
 
     /** lista inteira; se falhar ou vier vazia, baixa categoria por categoria */
-    private fun fetchList(action: String, kind: Kind, cs: List<Cat>, label: String, progress: (String) -> Unit): Pair<List<Item>, String> {
+    private fun fetchList(action: String, kind: Kind, cs: List<Cat>, label: String, file: String, progress: (String) -> Unit): List<Item> {
+        val tmp = File(dir(), "$file.tmp")
+        val dest = File(dir(), file)
         try {
-            val t = Xt.get(mapOf("action" to action))
-            val l = items(kind, t)
-            if (l.isNotEmpty()) return l to t
+            Xt.download(mapOf("action" to action), tmp)
+            val l = parseFile(kind, tmp)
+            if (l.isNotEmpty()) { dest.delete(); tmp.renameTo(dest); return l }
         } catch (e: Exception) {}
-        val all = JSONArray()
+        tmp.delete()
         val out = ArrayList<Item>()
         cs.forEachIndexed { i, c ->
             progress("Baixando $label… ${i + 1} de ${cs.size} categorias")
             try {
-                val a = toArr(Xt.get(mapOf("action" to action, "category_id" to c.id)))
-                if (a != null) for (j in 0 until a.length()) {
-                    val o = a.optJSONObject(j) ?: continue
-                    all.put(o); parseItem(kind, o)?.let { out.add(it) }
-                }
+                Xt.download(mapOf("action" to action, "category_id" to c.id), tmp)
+                out.addAll(parseFile(kind, tmp))
             } catch (e: Exception) {}
         }
-        return out to all.toString()
+        tmp.delete()
+        if (out.isNotEmpty()) writeItems(dest, out)
+        return out
     }
 
     fun list(k: Kind) = when (k) { Kind.LIVE -> live; Kind.MOVIE -> vod; Kind.SERIES -> series }
