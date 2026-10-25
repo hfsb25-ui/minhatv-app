@@ -684,7 +684,7 @@ object Trend {
 
     fun forKind(kind: Kind) = rows.filter { it.kind == kind }
 
-    private val reBrackets = Regex("""\[[^\]]*]|\{[^}]*}""")
+    private val reBrackets = Regex("""\[[^\]]*\]|\{[^\}]*\}""")
     private val reYearParen = Regex("""\((19|20)\d{2}\)""")
     private val rePrefix = Regex("""^\s*[a-z]{2,4}\s*[:|]\s*""")
     private val rePrefix2 = Regex("""^\s*(pt|br|ptbr|pt-br|leg|dub)\s*-\s+""")
