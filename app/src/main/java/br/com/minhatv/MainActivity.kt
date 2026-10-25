@@ -53,13 +53,18 @@ class MainActivity : ComponentActivity() {
     private var tab = "home"
     private var shownVersion = -1
     private var lastBack = 0L
+    private val openedAt = System.currentTimeMillis()
     private var epgJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // mostra o motivo se o app fechou sozinho da última vez
         Store.str("crash")?.let { c -> showCrash(c); return }
-        if (!Repo.hasCredentials()) { startActivity(Intent(this, LoginActivity::class.java)); finish(); return }
+        if (!Repo.hasCredentials()) {
+            setContentView(splashView(null))
+            window.decorView.postDelayed({ startActivity(Intent(this, LoginActivity::class.java)); finish() }, 1800)
+            return
+        }
         buildShell()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -168,20 +173,32 @@ class MainActivity : ComponentActivity() {
         content = FrameLayout(this)
         col.addView(content, llp(MATCH, 0, 1f))
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
-        loading = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setBackgroundColor(C.bg); isClickable = true
-        }
-        loading.addView(ProgressBar(this), llp(dp(48), dp(48)))
-        loadingTxt = text("Carregando…", 15f, C.tx2).apply { gravity = Gravity.CENTER }
-        loading.addView(loadingTxt, llp(WRAP, WRAP).apply { topMargin = dp(16) })
+        loading = splashView("Carregando…")
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(root)
     }
 
     private fun setLoading(msg: String?) {
-        if (msg == null) loading.visibility = View.GONE
-        else { loading.visibility = View.VISIBLE; loadingTxt.text = msg }
+        if (msg == null) {
+            val wait = 1800 - (System.currentTimeMillis() - openedAt)
+            if (wait > 0) loading.postDelayed({ loading.visibility = View.GONE }, wait) else loading.visibility = View.GONE
+        } else { loading.visibility = View.VISIBLE; loadingTxt.text = msg }
+    }
+
+    /** tela de abertura: logo + "Desenvolvido por Bruno Carvalho" */
+    private fun splashView(msg: String?): LinearLayout {
+        val v = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            setBackgroundColor(C.bg); isClickable = true
+        }
+        v.addView(ImageView(this).apply { setImageResource(R.drawable.logo_brtv); adjustViewBounds = true }, llp(WRAP, dp(170)))
+        v.addView(text("Desenvolvido por Bruno Carvalho", 12f, C.tx3).apply { gravity = Gravity.CENTER; letterSpacing = 0.04f }, llp(WRAP, WRAP).apply { topMargin = dp(14) })
+        val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        bottom.addView(ProgressBar(this), llp(dp(30), dp(30)))
+        loadingTxt = text(msg ?: "", 13f, C.tx2).apply { gravity = Gravity.CENTER }
+        bottom.addView(loadingTxt, llp(WRAP, WRAP).apply { topMargin = dp(10) })
+        v.addView(bottom, llp(WRAP, WRAP).apply { topMargin = dp(40) })
+        return v
     }
 
     private fun tabView(key: String, label: String): TextView = text(label, 15f, C.tx2).apply {
