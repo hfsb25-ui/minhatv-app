@@ -42,7 +42,7 @@ class LoginActivity : ComponentActivity() {
             setPadding(dp(64), dp(24), dp(64), dp(24))
             setBackgroundColor(C.bg)
         }
-        form.addView(text("MINHA TV", 26f, C.ac, true).apply { letterSpacing = 0.1f })
+        form.addView(android.widget.ImageView(this).apply { setImageResource(R.drawable.logo_brtv); adjustViewBounds = true; scaleType = android.widget.ImageView.ScaleType.FIT_START }, llp(WRAP, dp(90)))
         form.addView(text("Entre com a sua lista", 28f, Color.WHITE, true), llp(WRAP, WRAP).apply { topMargin = dp(14) })
         form.addView(text("Use os dados de acesso que o seu provedor enviou.", 14f, C.tx2), llp(WRAP, WRAP).apply { topMargin = dp(8) })
         srv = field("SERVIDOR", "http://servidor.com:8080", form, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)

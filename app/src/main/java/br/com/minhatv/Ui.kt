@@ -32,7 +32,7 @@ object C {
     val tx = 0xFFF2F2F4.toInt()
     val tx2 = 0xFFB9BDC7.toInt()
     val tx3 = 0xFF8A8F9B.toInt()
-    val ac = 0xFFF5B83D.toInt()
+    val ac = 0xFFF5D400.toInt()
     val live = 0xFFFF6B6B.toInt()
     val ok = 0xFF7FD18B.toInt()
     val pal = intArrayOf(0xFF22324A.toInt(), 0xFF3D2430.toInt(), 0xFF1F3D2E.toInt(), 0xFF3A3420.toInt(), 0xFF2A2A3F.toInt(), 0xFF3B2A1E.toInt(), 0xFF203A3D.toInt(), 0xFF33223D.toInt(), 0xFF2D3320.toInt(), 0xFF3D2A24.toInt())

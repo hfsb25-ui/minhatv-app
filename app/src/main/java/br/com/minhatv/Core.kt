@@ -53,7 +53,7 @@ val http: OkHttpClient by lazy {
         .build()
 }
 
-const val UA = "MinhaTV/1.0 (Linux; Android)"
+const val UA = "BRTV/1.0 (Linux; Android)"
 
 /* ================= armazenamento simples ================= */
 object Store {

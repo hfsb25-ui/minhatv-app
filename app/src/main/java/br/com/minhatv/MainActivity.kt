@@ -154,7 +154,7 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(40), dp(14), dp(40), dp(10))
         }
-        header.addView(text("MINHA TV", 22f, C.ac, true).apply { letterSpacing = 0.1f })
+        header.addView(ImageView(this).apply { setImageResource(R.drawable.logo_brtv); adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START }, llp(WRAP, dp(40)))
         tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("home" to "Início", "live" to "Ao vivo", "movie" to "Filmes", "series" to "Séries", "mylist" to "Minha lista", "search" to "Buscar").forEach { (k, n) ->
             tabs.addView(tabView(k, n))
@@ -504,7 +504,7 @@ class MainActivity : ComponentActivity() {
                 fun paint(f: Boolean) {
                     tv.setTextColor(if (on || f) Color.WHITE else C.tx2)
                     tv.paint.isFakeBoldText = on
-                    tv.background = when { f -> rounded(0x33FFFFFF, dpf(6f), dp(2), C.ac); on -> rounded(0x24F5B83D, dpf(6f)); else -> null }
+                    tv.background = when { f -> rounded(0x33FFFFFF, dpf(6f), dp(2), C.ac); on -> rounded(0x24F5D400, dpf(6f)); else -> null }
                 }
                 paint(tv.isFocused)
                 tv.setOnFocusChangeListener { _, f -> paint(f) }
