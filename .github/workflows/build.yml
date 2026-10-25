@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-24.04
@@ -36,3 +39,23 @@ jobs:
         with:
           name: MinhaTV-apk
           path: MinhaTV.apk
+
+      - name: Guardar o APK no branch "apk"
+        shell: bash
+        run: |
+          mkdir -p /tmp/out && cp MinhaTV.apk /tmp/out/
+          cd /tmp/out
+          git init -q -b apk
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add MinhaTV.apk
+          git commit -q -m "APK ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" apk
+
+      - name: Publicar na página de Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release delete ultima-versao -y --cleanup-tag || true
+          gh release create ultima-versao MinhaTV.apk --title "Minha TV (última versão)" --notes "APK gerado automaticamente a partir do código ${GITHUB_SHA::7}."
