@@ -105,6 +105,17 @@ object Covers {
     }
 }
 
+/** moldura que mantém sempre a proporção (pôster 2:3 ou canal 16:9), seja qual for a largura */
+class RatioFrame(c: Context, private val ratio: Float) : FrameLayout(c) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        if (w > 0) {
+            val h = (w * ratio).toInt()
+            super.onMeasure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
+        } else super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+}
+
 /* ================= capas (cards) ================= */
 class Card(
     val item: Item?,
@@ -152,7 +163,7 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
             outer.addView(rankTv, llp(WRAP, WRAP).apply { marginEnd = -c.dp(14) })
         }
         val col = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        val box = FrameLayout(c).apply {
+        val box = RatioFrame(c, if (live) 9f / 16f else 1.5f).apply {
             background = rounded(C.bg3, c.dpf(8f))
             clipToOutline = true
             outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
@@ -180,7 +191,7 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
         box.addView(num, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START).apply { setMargins(c.dp(6), c.dp(6), 0, 0) })
         val title = c.text("", 12f, 0xFFE3E4E8.toInt(), true, 1)
         val sub = c.text("", 11f, C.tx3, false, 1)
-        col.addView(box, llp(if (fill) MATCH else w, h))
+        col.addView(box, llp(if (fill) MATCH else w, WRAP))
         col.addView(title, llp(if (fill) MATCH else w, WRAP).apply { topMargin = c.dp(6) })
         col.addView(sub, llp(if (fill) MATCH else w, WRAP).apply { topMargin = c.dp(2) })
         outer.addView(col, llp(if (fill) MATCH else WRAP, WRAP))
@@ -193,12 +204,6 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
             v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(130).start()
             v.translationZ = if (f) 10f else 0f
             if (f) (v.tag as? Card)?.onFocus?.invoke()
-        }
-        if (fill) {
-            box.post {
-                val bw = box.width
-                if (bw > 0) { box.layoutParams = box.layoutParams.apply { height = if (live) bw * 9 / 16 else bw * 3 / 2 }; box.requestLayout() }
-            }
         }
         return CardVH(outer, box, img, fb, title, sub, bar, barBg, badge, num, rankTv)
     }
