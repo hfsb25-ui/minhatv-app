@@ -546,6 +546,8 @@ object Trend {
     )
 
     var rows: List<Row> = emptyList()
+    /** nota do TMDB (0 a 10) dos títulos em alta encontrados na lista, pela chave do item */
+    var votes: Map<String, Double> = emptyMap()
     var updated = 0L
     var error: String? = null
     private var builtFor = -1
@@ -594,6 +596,7 @@ object Trend {
                                     .put("ot", if (kind == "movie") r.s("original_title") else r.s("original_name"))
                                     .put("y", date.take(4).toIntOrNull() ?: 0)
                                     .put("pop", r.optDouble("popularity", 0.0))
+                                    .put("va", r.optDouble("vote_average", 0.0))
                             )
                         }
                     } catch (e: Exception) {}
@@ -663,6 +666,7 @@ object Trend {
         val iv = Idx(Repo.vod)
         val isr = Idx(Repo.series)
         val res = ArrayList<Row>()
+        val vt = HashMap<String, Double>()
         val plats = raw.optJSONArray("plats") ?: JSONArray()
         listOf(Kind.MOVIE, Kind.SERIES).forEach { kind ->
             for (i in 0 until plats.length()) {
@@ -674,12 +678,13 @@ object Trend {
                 val items = ArrayList<Item>()
                 list.forEach { x ->
                     val it = find(if (kind == Kind.MOVIE) iv else isr, x.s("id"), x.s("t"), x.s("ot"), x.optInt("y"))
-                    if (it != null && seen.add(it.id)) items.add(it)
+                    if (it != null && seen.add(it.id)) { items.add(it); x.optDouble("va", 0.0).takeIf { v -> v > 0 }?.let { v -> vt[it.key] = v } }
                 }
                 if (items.isNotEmpty()) res.add(Row(plat, kind, items))
             }
         }
         rows = res
+        votes = vt
     }
 
     fun forKind(kind: Kind) = rows.filter { it.kind == kind }
