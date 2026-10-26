@@ -383,7 +383,7 @@ class RowsAdapter(var entries: List<HomeEntry>) : RecyclerView.Adapter<RecyclerV
             is HomeEntry.Row -> {
                 val h = holder as RowVH
                 if (h.key.isNotEmpty()) RowMemory.states[h.key] = h.list.layoutManager?.onSaveInstanceState()
-                h.key = e.title
+                h.key = e.title + "|" + e.badge
                 h.title.text = e.title
                 h.badge.text = e.badge
                 h.badge.visibility = if (e.badge.isEmpty()) View.GONE else View.VISIBLE
@@ -398,7 +398,7 @@ class RowsAdapter(var entries: List<HomeEntry>) : RecyclerView.Adapter<RecyclerV
                     a.cards = e.cards
                     a.notifyDataSetChanged()
                 }
-                RowMemory.states[e.title]?.let { st -> h.list.layoutManager?.onRestoreInstanceState(st) } ?: h.list.scrollToPosition(0)
+                RowMemory.states[h.key]?.let { st -> h.list.layoutManager?.onRestoreInstanceState(st) } ?: h.list.scrollToPosition(0)
             }
         }
     }
