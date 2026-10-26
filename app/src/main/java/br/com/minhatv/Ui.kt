@@ -126,35 +126,23 @@ class Card(
     val progress: Int = -1,
     val rank: Int = 0,
     val onFocus: (() -> Unit)? = null,
-    val art: String = "",
     val onClick: () -> Unit
 )
 
 class CardVH(
     val root: LinearLayout, val box: FrameLayout, val img: ImageView, val fb: TextView,
-    val title: TextView, val sub: TextView, val bar: View, val barBg: View, val badge: TextView, val num: TextView,
-    val rankTv: TextView?, val fresh: TextView
+    val title: TextView, val sub: TextView, val bar: View, val barBg: View, val badge: TextView, val num: TextView, val rankTv: TextView?
 ) : RecyclerView.ViewHolder(root)
 
-private const val WEEK = 7L * 24 * 3600
-
-class CardAdapter(
-    var cards: List<Card>, private val ranked: Boolean = false, private val fill: Boolean = false, private val wide: Boolean = false
-) : RecyclerView.Adapter<CardVH>() {
+class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, private val fill: Boolean = false) : RecyclerView.Adapter<CardVH>() {
     override fun getItemCount() = cards.size
-    override fun getItemViewType(position: Int) = when {
-        cards[position].kind == Kind.LIVE -> 1
-        wide -> 2
-        ranked -> 3
-        else -> 0
-    }
+    override fun getItemViewType(position: Int) = if (cards[position].kind == Kind.LIVE) 1 else 0
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CardVH {
         val c = parent.context
         val live = viewType == 1
-        val isWide = viewType == 2
-        val isRanked = viewType == 3
-        val w = when { live -> c.dp(170); isWide -> c.dp(228); else -> c.dp(118) }
+        val w = if (live) c.dp(170) else c.dp(118)
+        val h = if (live) c.dp(96) else c.dp(177)
         val outer = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
@@ -164,7 +152,7 @@ class CardAdapter(
             layoutParams = RecyclerView.LayoutParams(if (fill) MATCH else WRAP, WRAP)
         }
         var rankTv: TextView? = null
-        if (isRanked) {
+        if (ranked) {
             rankTv = c.text("", 96f, C.bg, true).apply {
                 paint.style = android.graphics.Paint.Style.STROKE
                 paint.strokeWidth = c.dpf(2f)
@@ -175,7 +163,7 @@ class CardAdapter(
             outer.addView(rankTv, llp(WRAP, WRAP).apply { marginEnd = -c.dp(14) })
         }
         val col = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
-        val box = RatioFrame(c, if (live || isWide) 9f / 16f else 1.5f).apply {
+        val box = RatioFrame(c, if (live) 9f / 16f else 1.5f).apply {
             background = rounded(C.bg3, c.dpf(8f))
             clipToOutline = true
             outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
@@ -195,47 +183,42 @@ class CardAdapter(
             setPadding(c.dp(5), c.dp(2), c.dp(5), c.dp(2))
             background = rounded(0x8C000000.toInt(), c.dpf(4f))
         }
-        // selo "NOVO" / "NOVOS EPISÓDIOS" (vermelho, no pé da capa, como na Netflix)
-        val fresh = c.text("", 9f, Color.WHITE, true).apply {
-            setPadding(c.dp(6), c.dp(2), c.dp(6), c.dp(2))
-            background = rounded(0xFFE50914.toInt(), c.dpf(3f))
-            letterSpacing = 0.05f
-        }
         box.addView(fb, FrameLayout.LayoutParams(MATCH, MATCH))
         box.addView(img, FrameLayout.LayoutParams(MATCH, MATCH))
         box.addView(barBg, FrameLayout.LayoutParams(MATCH, c.dp(4), Gravity.BOTTOM))
         box.addView(bar, FrameLayout.LayoutParams(0, c.dp(4), Gravity.BOTTOM))
         box.addView(badge, FrameLayout.LayoutParams(c.dp(24), c.dp(24), Gravity.TOP or Gravity.END).apply { setMargins(0, c.dp(6), c.dp(6), 0) })
         box.addView(num, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START).apply { setMargins(c.dp(6), c.dp(6), 0, 0) })
-        box.addView(fresh, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = c.dp(8) })
         val title = c.text("", 12f, 0xFFE3E4E8.toInt(), true, 1)
         val sub = c.text("", 11f, C.tx3, false, 1)
         col.addView(box, llp(if (fill) MATCH else w, WRAP))
         col.addView(title, llp(if (fill) MATCH else w, WRAP).apply { topMargin = c.dp(6) })
         col.addView(sub, llp(if (fill) MATCH else w, WRAP).apply { topMargin = c.dp(2) })
         outer.addView(col, llp(if (fill) MATCH else WRAP, WRAP))
-        val focusRing = rounded(0, c.dpf(8f), c.dp(3), C.ac)
+        val normalBg = box.background
+        val focusBg = rounded(C.bg3, c.dpf(8f), c.dp(3), C.ac)
         outer.setOnFocusChangeListener { v, f ->
-            box.foreground = if (f) focusRing else null
+            box.background = if (f) focusBg else normalBg
             title.setTextColor(if (f) Color.WHITE else 0xFFE3E4E8.toInt())
             rankTv?.setTextColor(if (f) C.ac else 0xFF7D828E.toInt())
-            v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(150).start()
+            v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(130).start()
             v.translationZ = if (f) 10f else 0f
             if (f) (v.tag as? Card)?.onFocus?.invoke()
         }
-        return CardVH(outer, box, img, fb, title, sub, bar, barBg, badge, num, rankTv, fresh)
+        return CardVH(outer, box, img, fb, title, sub, bar, barBg, badge, num, rankTv)
     }
 
     override fun onBindViewHolder(h: CardVH, position: Int) {
         val card = cards[position]
-        val isWide = getItemViewType(position) == 2
         h.root.tag = card
         h.root.setOnClickListener { card.onClick() }
         h.title.text = card.title
         h.sub.text = card.sub
         h.sub.visibility = if (card.sub.isEmpty()) View.GONE else View.VISIBLE
         h.fb.text = card.title
-        h.box.background = rounded(if (card.kind == Kind.LIVE) 0xFF1B2230.toInt() else C.colorFor(card.title), h.root.context.dpf(8f))
+        h.box.setBackgroundColor(0)
+        h.box.background = rounded(C.colorFor(card.title), h.root.context.dpf(8f))
+        if (card.kind == Kind.LIVE) h.box.background = rounded(0xFF1B2230.toInt(), h.root.context.dpf(8f))
         h.rankTv?.text = if (card.rank > 0) card.rank.toString() else ""
         h.num.text = card.item?.num ?: ""
         h.num.visibility = if (card.kind == Kind.LIVE && !card.item?.num.isNullOrEmpty()) View.VISIBLE else View.GONE
@@ -250,20 +233,12 @@ class CardAdapter(
         h.badge.text = badge
         h.badge.setTextColor(if (badge == "★") C.ac else C.ok)
         h.badge.visibility = if (badge.isEmpty()) View.GONE else View.VISIBLE
-        // selo de novidade (últimos 7 dias)
-        val now = System.currentTimeMillis() / 1000
-        val fresh = if (it != null && card.progress < 0 && it.added > 0 && now - it.added in 0..WEEK) {
-            when (it.kind) { Kind.MOVIE -> "NOVO"; Kind.SERIES -> "NOVOS EPISÓDIOS"; else -> "" }
-        } else ""
-        h.fresh.text = fresh
-        h.fresh.visibility = if (fresh.isEmpty() || pct > 0) View.GONE else View.VISIBLE
         if (pct > 0) {
             h.bar.visibility = View.VISIBLE; h.barBg.visibility = View.VISIBLE
             h.box.post { h.bar.layoutParams = h.bar.layoutParams.apply { width = h.box.width * pct / 100 }; h.bar.requestLayout() }
         } else { h.bar.visibility = View.GONE; h.barBg.visibility = View.GONE }
-        val url = if (isWide) card.art.ifEmpty { Art.backdrop(it) }.ifEmpty { card.icon } else card.icon
-        loadImg(h, url)
-        if (it != null && it.icon.isEmpty() && it.kind == Kind.MOVIE && url.isEmpty()) {
+        loadImg(h, card.icon)
+        if (it != null && it.icon.isEmpty() && it.kind == Kind.MOVIE) {
             Covers.fill(it) { u -> if (h.root.tag === card) loadImg(h, u) }
         }
     }
@@ -279,38 +254,10 @@ class CardAdapter(
     }
 }
 
-/** fileira horizontal: a capa selecionada fica sempre no começo, como na Netflix */
-class SnapRowLM(c: Context) : LinearLayoutManager(c, HORIZONTAL, false) {
-    override fun requestChildRectangleOnScreen(parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean): Boolean {
-        val dx = getDecoratedLeft(child) - paddingLeft
-        if (dx == 0) return false
-        if (immediate) parent.scrollBy(dx, 0) else parent.smoothScrollBy(dx, 0)
-        return true
-    }
-}
-
-/** lista de fileiras: a fileira selecionada sobe para o topo */
-class SnapColLM(c: Context) : LinearLayoutManager(c, VERTICAL, false) {
-    override fun requestChildRectangleOnScreen(parent: RecyclerView, child: View, rect: android.graphics.Rect, immediate: Boolean, focusedChildVisible: Boolean): Boolean {
-        val dy = getDecoratedTop(child) - paddingTop
-        if (dy == 0) return false
-        if (immediate) parent.scrollBy(0, dy) else parent.smoothScrollBy(0, dy)
-        return true
-    }
-}
-
-/** lembra até onde cada fileira foi rolada (durante o uso do app) */
-object RowMemory {
-    val states = HashMap<String, android.os.Parcelable?>()
-}
-
 /* ================= fileiras (estilo Netflix) ================= */
 sealed class HomeEntry {
     class Hero(val view: View) : HomeEntry()
-    class Row(
-        val title: String, val cards: List<Card>, val badge: String = "", val badgeColor: Int = 0, val extra: String = "",
-        val ranked: Boolean = false, val live: Boolean = false, val wide: Boolean = false
-    ) : HomeEntry()
+    class Row(val title: String, val cards: List<Card>, val badge: String = "", val badgeColor: Int = 0, val extra: String = "", val ranked: Boolean = false, val live: Boolean = false) : HomeEntry()
     class Note(val text: String) : HomeEntry()
 }
 
@@ -318,13 +265,11 @@ class RowsAdapter(var entries: List<HomeEntry>) : RecyclerView.Adapter<RecyclerV
     private val pool = RecyclerView.RecycledViewPool()
 
     class HeroVH(val frame: FrameLayout) : RecyclerView.ViewHolder(frame)
-    class RowVH(val root: LinearLayout, val title: TextView, val badge: TextView, val extra: TextView, val list: RecyclerView) : RecyclerView.ViewHolder(root) {
-        var key = ""
-    }
+    class RowVH(val root: LinearLayout, val title: TextView, val badge: TextView, val extra: TextView, val list: RecyclerView) : RecyclerView.ViewHolder(root)
     class NoteVH(val tv: TextView) : RecyclerView.ViewHolder(tv)
 
     override fun getItemCount() = entries.size
-    override fun getItemViewType(position: Int) = when (val e = entries[position]) { is HomeEntry.Hero -> 0; is HomeEntry.Row -> if (e.ranked) 3 else if (e.wide) 4 else 1; is HomeEntry.Note -> 2 }
+    override fun getItemViewType(position: Int) = when (entries[position]) { is HomeEntry.Hero -> 0; is HomeEntry.Row -> if ((entries[position] as HomeEntry.Row).ranked) 3 else 1; is HomeEntry.Note -> 2 }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val c = parent.context
@@ -340,21 +285,21 @@ class RowsAdapter(var entries: List<HomeEntry>) : RecyclerView.Adapter<RecyclerV
                 val root = LinearLayout(c).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = RecyclerView.LayoutParams(MATCH, WRAP)
-                    setPadding(0, c.dp(6), 0, c.dp(2))
+                    setPadding(0, c.dp(10), 0, c.dp(4))
                     clipChildren = false; clipToPadding = false
                 }
                 val head = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(c.dp(40), 0, c.dp(40), 0) }
-                val title = c.text("", 16f, Color.WHITE, true)
+                val title = c.text("", 17f, Color.WHITE, true)
                 val badge = c.text("", 12f, Color.WHITE, true).apply { setPadding(c.dp(7), c.dp(3), c.dp(7), c.dp(3)) }
                 val extra = c.text("", 11f, C.tx3)
                 head.addView(title)
                 head.addView(badge, llp(WRAP, WRAP).apply { marginStart = c.dp(8) })
                 head.addView(extra, llp(WRAP, WRAP).apply { marginStart = c.dp(8) })
                 val list = RecyclerView(c).apply {
-                    layoutManager = SnapRowLM(c)
+                    layoutManager = LinearLayoutManager(c, LinearLayoutManager.HORIZONTAL, false)
                     setRecycledViewPool(pool)
                     clipChildren = false; clipToPadding = false
-                    setPadding(c.dp(34), c.dp(2), c.dp(34), c.dp(2))
+                    setPadding(c.dp(34), c.dp(4), c.dp(34), c.dp(4))
                     isFocusable = false
                     descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
                     setItemViewCacheSize(8)
@@ -364,11 +309,6 @@ class RowsAdapter(var entries: List<HomeEntry>) : RecyclerView.Adapter<RecyclerV
                 RowVH(root, title, badge, extra, list)
             }
         }
-    }
-
-    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
-        if (holder is RowVH && holder.key.isNotEmpty()) RowMemory.states[holder.key] = holder.list.layoutManager?.onSaveInstanceState()
-        super.onViewRecycled(holder)
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
@@ -382,23 +322,19 @@ class RowsAdapter(var entries: List<HomeEntry>) : RecyclerView.Adapter<RecyclerV
             is HomeEntry.Note -> (holder as NoteVH).tv.text = e.text
             is HomeEntry.Row -> {
                 val h = holder as RowVH
-                if (h.key.isNotEmpty()) RowMemory.states[h.key] = h.list.layoutManager?.onSaveInstanceState()
-                h.key = e.title + "|" + e.badge
                 h.title.text = e.title
                 h.badge.text = e.badge
                 h.badge.visibility = if (e.badge.isEmpty()) View.GONE else View.VISIBLE
                 if (e.badge.isNotEmpty()) h.badge.background = rounded(e.badgeColor, h.root.context.dpf(4f))
                 h.extra.text = e.extra
-                val mode = if (e.ranked) "r" else if (e.wide) "w" else "n"
                 val a = h.list.adapter as? CardAdapter
-                if (a == null || h.list.tag != mode) {
-                    h.list.adapter = CardAdapter(e.cards, ranked = e.ranked, wide = e.wide)
-                    h.list.tag = mode
+                if (a == null || h.list.tag != e.ranked) {
+                    h.list.adapter = CardAdapter(e.cards, e.ranked)
+                    h.list.tag = e.ranked
                 } else {
                     a.cards = e.cards
                     a.notifyDataSetChanged()
                 }
-                RowMemory.states[h.key]?.let { st -> h.list.layoutManager?.onRestoreInstanceState(st) } ?: h.list.scrollToPosition(0)
             }
         }
     }

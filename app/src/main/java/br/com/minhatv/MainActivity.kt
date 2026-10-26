@@ -46,10 +46,7 @@ object Now {
 
 class MainActivity : ComponentActivity() {
     private lateinit var content: FrameLayout
-    private lateinit var rail: LinearLayout
-    private val railItems = ArrayList<LinearLayout>()
-    private var railOpen = false
-    private lateinit var railLogo: ImageView
+    private lateinit var tabs: LinearLayout
     private lateinit var acct: TextView
     private lateinit var loading: LinearLayout
     private lateinit var loadingTxt: TextView
@@ -68,7 +65,6 @@ class MainActivity : ComponentActivity() {
         Store.str("crash")?.let { c -> showCrash(c); return }
         if (!Repo.hasCredentials()) {
             setContentView(splashView(null, true))
-            playIntro()
             window.decorView.postDelayed({ startActivity(Intent(this, LoginActivity::class.java)); finish() }, 1800)
             return
         }
@@ -76,13 +72,9 @@ class MainActivity : ComponentActivity() {
         fastStart = savedInstanceState != null || Repo.vod.isNotEmpty() || Repo.live.isNotEmpty()
         savedInstanceState?.getString("tab")?.let { tab = it }
         buildShell()
-        if (!fastStart) playIntro()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                // como na Netflix: voltar leva primeiro ao menu lateral
-                val f = currentFocus
-                if (f != null && !isInRail(f)) { (railItems.firstOrNull { it.tag == tab } ?: railItems.firstOrNull())?.requestFocus(); return }
-                if (tab != "home") { show("home"); railItems.firstOrNull()?.requestFocus(); return }
+                if (tab != "home") { show("home"); tabs.getChildAt(0).requestFocus(); return }
                 if (System.currentTimeMillis() - lastBack < 2500) { finish(); return }
                 lastBack = System.currentTimeMillis()
                 Toast.makeText(this@MainActivity, "Aperte voltar de novo para sair", Toast.LENGTH_SHORT).show()
@@ -158,7 +150,7 @@ class MainActivity : ComponentActivity() {
             // só redesenha se algo mudou e a pessoa estiver no topo do Início (para não pular o foco)
             if (tab == "home" && before != after) {
                 val f = currentFocus
-                if (f == null || isInRail(f) || isInHero(f)) render(keepFocus = true)
+                if (f == null || f.parent === tabs || isInHero(f)) render(keepFocus = true)
             }
         }
     }
@@ -174,90 +166,32 @@ class MainActivity : ComponentActivity() {
         finish()
     }
 
-    /* ---------- estrutura: menu lateral recolhível + conteúdo ---------- */
-    private val RAIL_W = 64
-    private val RAIL_OPEN_W = 220
-
+    /* ---------- estrutura ---------- */
     private fun buildShell() {
         val root = FrameLayout(this).apply { setBackgroundColor(C.bg) }
-        content = FrameLayout(this)
-        root.addView(content, FrameLayout.LayoutParams(MATCH, MATCH).apply { marginStart = dp(RAIL_W) })
-        rail = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(18), dp(10), dp(16))
-            setBackgroundColor(C.bg)
-            elevation = dpf(16f)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(40), dp(14), dp(40), dp(10))
         }
-        railLogo = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher); adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START }
-        rail.addView(railLogo, llp(WRAP, dp(38)).apply { marginStart = dp(3); bottomMargin = dp(26) })
-        listOf(
-            Triple("home", "Início", R.drawable.ic_nav_home), Triple("live", "Ao vivo", R.drawable.ic_nav_live),
-            Triple("movie", "Filmes", R.drawable.ic_nav_movie), Triple("series", "Séries", R.drawable.ic_nav_series),
-            Triple("mylist", "Minha lista", R.drawable.ic_nav_list), Triple("search", "Buscar", R.drawable.ic_nav_search)
-        ).forEach { (k, n, ic) -> val v = railItem(k, n, ic); railItems.add(v); rail.addView(v, llp(MATCH, WRAP).apply { bottomMargin = dp(4) }) }
-        rail.addView(View(this), llp(1, 0, 1f))
-        acct = text("", 11f, C.tx3).apply { visibility = View.GONE; setPadding(dp(10), 0, dp(6), dp(8)) }
-        rail.addView(acct, llp(MATCH, WRAP))
-        rail.addView(railItem("exit", "Sair da lista", R.drawable.ic_nav_exit), llp(MATCH, WRAP))
-        root.addView(rail, FrameLayout.LayoutParams(dp(RAIL_W), MATCH))
+        header.addView(ImageView(this).apply { setImageResource(R.drawable.logo_brtv); adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START }, llp(WRAP, dp(40)))
+        tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("home" to "Início", "live" to "Ao vivo", "movie" to "Filmes", "series" to "Séries", "mylist" to "Minha lista", "search" to "Buscar").forEach { (k, n) ->
+            tabs.addView(tabView(k, n))
+        }
+        header.addView(tabs, llp(WRAP, WRAP).apply { marginStart = dp(28) })
+        header.addView(View(this), llp(0, 1, 1f))
+        acct = text("", 11f, C.tx3).apply { gravity = Gravity.END }
+        header.addView(acct)
+        header.addView(button("Sair") { confirmLogout() }.apply { textSize = 12f; setPadding(dp(12), dp(6), dp(12), dp(6)) }, llp(WRAP, WRAP).apply { marginStart = dp(14) })
+        col.addView(header, llp(MATCH, WRAP))
+        content = FrameLayout(this)
+        col.addView(content, llp(MATCH, 0, 1f))
+        root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
         loading = splashView("Carregando…", !fastStart)
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(root)
-        // abre o menu quando o foco entra nele e recolhe quando sai
-        root.viewTreeObserver.addOnGlobalFocusChangeListener { _, n -> setRailOpen(n != null && isInRail(n)) }
-    }
-
-    private fun railItem(key: String, label: String, icon: Int): LinearLayout = LinearLayout(this).apply {
-        tag = key
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        isFocusable = true; isClickable = true
-        setPadding(dp(10), dp(9), dp(10), dp(9))
-        addView(ImageView(this@MainActivity).apply { setImageResource(icon); setColorFilter(C.tx3) }, llp(dp(24), dp(24)))
-        addView(text(label, 15f, C.tx2, false, 1).apply { visibility = View.GONE }, llp(WRAP, WRAP).apply { marginStart = dp(16) })
-        setOnFocusChangeListener { _, _ -> paintRail() }
-        setOnClickListener {
-            if (key == "exit") confirmLogout()
-            else { show(key); content.post { content.requestFocus(View.FOCUS_RIGHT) } }
-        }
-    }
-
-    private fun isInRail(v: View): Boolean {
-        var p: View? = v
-        while (p != null) { if (p === rail) return true; p = p.parent as? View }
-        return false
-    }
-
-    private fun setRailOpen(open: Boolean) {
-        if (open == railOpen || !::rail.isInitialized) return
-        railOpen = open
-        rail.layoutParams = rail.layoutParams.apply { width = dp(if (open) RAIL_OPEN_W else RAIL_W) }
-        rail.background = if (open) GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xFF0A0B0F.toInt(), 0xF50A0B0F.toInt(), 0xE60A0B0F.toInt())) else null
-        if (!open) rail.setBackgroundColor(C.bg)
-        railLogo.setImageResource(if (open) R.drawable.logo_brtv else R.mipmap.ic_launcher)
-        acct.visibility = if (open) View.VISIBLE else View.GONE
-        for (i in 0 until rail.childCount) {
-            val item = rail.getChildAt(i) as? LinearLayout ?: continue
-            (item.getChildAt(1) as? TextView)?.visibility = if (open) View.VISIBLE else View.GONE
-        }
-        rail.requestLayout()
-        paintRail()
-    }
-
-    private fun paintRail() {
-        for (i in 0 until rail.childCount) {
-            val item = rail.getChildAt(i) as? LinearLayout ?: continue
-            if (item.tag !is String) continue
-            val on = item.tag == tab
-            val f = item.isFocused
-            (item.getChildAt(0) as? ImageView)?.setColorFilter(if (on) C.ac else if (f) Color.WHITE else C.tx3)
-            (item.getChildAt(1) as? TextView)?.let { t ->
-                t.setTextColor(if (on || f) Color.WHITE else C.tx2)
-                t.paint.isFakeBoldText = on
-                t.invalidate()
-            }
-            item.background = if (f) rounded(0x33FFFFFF, dpf(8f)) else null
-        }
     }
 
     private fun setLoading(msg: String?) {
@@ -267,18 +201,7 @@ class MainActivity : ComponentActivity() {
         } else { loading.visibility = View.VISIBLE; loadingTxt.text = msg }
     }
 
-    /** som curto da abertura (original, gerado para o BR TV) */
-    private fun playIntro() {
-        try {
-            android.media.MediaPlayer.create(this, R.raw.abertura)?.apply {
-                setVolume(0.8f, 0.8f)
-                setOnCompletionListener { it.release() }
-                start()
-            }
-        } catch (e: Exception) {}
-    }
-
-    /** tela de abertura: logo animada + "Desenvolvido por Bruno Carvalho" */
+    /** tela de abertura: logo + "Desenvolvido por Bruno Carvalho" */
     private fun splashView(msg: String?, animate: Boolean = false): LinearLayout {
         val v = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
@@ -303,6 +226,37 @@ class MainActivity : ComponentActivity() {
         return v
     }
 
+    private fun tabView(key: String, label: String): TextView = text(label, 15f, C.tx2).apply {
+        tag = key
+        isFocusable = true; isClickable = true
+        setPadding(dp(12), dp(7), dp(12), dp(7))
+        setOnFocusChangeListener { _, _ -> paintTabs() }
+        setOnClickListener { show(key) }
+    }
+
+    private fun paintTabs() {
+        for (i in 0 until tabs.childCount) {
+            val t = tabs.getChildAt(i) as TextView
+            val on = t.tag == tab
+            val f = t.isFocused
+            t.setTextColor(if (on || f) Color.WHITE else C.tx2)
+            t.paint.isFakeBoldText = on
+            t.background = when {
+                f -> rounded(0x33FFFFFF, dpf(8f))
+                on -> underline()
+                else -> null
+            }
+            t.invalidate()
+        }
+    }
+
+    private fun underline(): android.graphics.drawable.Drawable {
+        val line = GradientDrawable().apply { setColor(C.ac) }
+        return android.graphics.drawable.LayerDrawable(arrayOf(line)).apply {
+            setLayerInset(0, 0, dp(30), 0, 0)
+        }
+    }
+
     private fun showAccount() {
         val exp = if (Repo.expDate > 0) "\naté " + SimpleDateFormat("dd/MM/yyyy", Locale("pt", "BR")).format(Date(Repo.expDate * 1000)) else ""
         acct.text = Repo.userName.ifEmpty { Xt.user } + exp
@@ -320,7 +274,7 @@ class MainActivity : ComponentActivity() {
     /* ---------- troca de aba ---------- */
     private fun show(key: String) {
         tab = key
-        paintRail()
+        paintTabs()
         render(false)
     }
 
@@ -395,14 +349,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** cartão largo do "continuar assistindo": imagem do episódio + nome do episódio */
-    private fun contCard(p: Prog, onFocus: Boolean = false): Card {
-        val item = if (p.kind == "series") Repo.find(Kind.SERIES, p.sid) else Repo.findKey(p.key)
-        val sub = if (p.sub.isNotEmpty()) p.sub + (if (p.ept.isNotEmpty()) " · " + p.ept else "") else "Faltam " + fmtDur(p.dur - p.pos)
-        return Card(item, p.name, Kind.MOVIE, p.icon, sub, p.pct, onFocus = if (onFocus && item != null) ({ preview(item) }) else null,
-            art = p.img.ifEmpty { Art.backdrop(item) }.ifEmpty { item?.let { Discover.artCached(it)?.backdrop } ?: "" }) { resume(p) }
-    }
-
     private fun resume(p: Prog) {
         Now.series = null; Now.episodes = emptyList()
         val i = Intent(this, PlayerActivity::class.java)
@@ -417,204 +363,46 @@ class MainActivity : ComponentActivity() {
     private fun card(it: Item, list: List<Item>? = null, rank: Int = 0, onFocus: (() -> Unit)? = null) =
         Card(it, it.name, it.kind, rank = rank, onFocus = onFocus) { open(it, list) }
 
-    /* ---------- Início (estilo Netflix: painel no topo que muda com a capa selecionada) ---------- */
-    private var heroList: List<Pair<Item, String>> = emptyList()
-    private var heroIdx = 0
-    private var heroMode = true
-    private var previewKey: String? = null
-    private var previewJob: Job? = null
-    private var panel: Panel? = null
-
-    private class Panel(
-        val root: FrameLayout, val bd: ImageView, val tag: TextView, val logo: ImageView, val title: TextView,
-        val meta: TextView, val plot: TextView, val btns: LinearLayout, val dots: TextView
-    )
-
-    private fun hcard(it: Item, list: List<Item>? = null, rank: Int = 0) =
-        Card(it, it.name, it.kind, rank = rank, onFocus = { preview(it) }) { open(it, list) }
-
+    /* ---------- Início ---------- */
     private fun homeView(): View {
         val e = ArrayList<HomeEntry>()
         val movies = Repo.recent(Repo.vod)
-        heroList = heroCandidates(movies)
+        val heroes = heroCandidates(movies)
+        if (heroes.isNotEmpty()) e.add(HomeEntry.Hero(heroView(heroes)))
         val cont = Lib.progs().filter { it.dur > 0 && !Lib.isSeen(it.key) }.take(20)
-        if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", cont.map { contCard(it, true) }, wide = true))
+        if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", cont.map { p ->
+            Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct) { resume(p) }
+        }))
         val favs = Lib.favs().mapNotNull { Repo.findKey(it) }
         val myl = favs.filter { it.kind != Kind.LIVE }.take(30)
-        if (myl.isNotEmpty()) e.add(HomeEntry.Row("Minha lista", myl.map { hcard(it) }))
+        if (myl.isNotEmpty()) e.add(HomeEntry.Row("Minha lista", myl.map { card(it) }))
         val fch = favs.filter { it.kind == Kind.LIVE }
-        if (fch.isNotEmpty()) e.add(HomeEntry.Row("Canais favoritos", fch.map { hcard(it, fch) }))
+        if (fch.isNotEmpty()) e.add(HomeEntry.Row("Canais favoritos", fch.map { card(it, fch) }))
         val upd = if (Trend.updated > 0) "no seu catálogo · atualizado às " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(Trend.updated)) else "no seu catálogo"
         listOf(Kind.MOVIE to "filmes", Kind.SERIES to "séries").forEach { (k, label) ->
             Trend.forKind(k).forEach { r ->
-                e.add(HomeEntry.Row("Top 10 $label na", r.items.take(10).mapIndexed { i, it -> hcard(it, rank = i + 1) }, r.plat.n, r.plat.color, upd, ranked = true))
+                e.add(HomeEntry.Row("Top 10 $label na", r.items.take(10).mapIndexed { i, it -> card(it, rank = i + 1) }, r.plat.n, r.plat.color, upd, ranked = true))
             }
         }
-        Discover.because?.let { (src, l) -> e.add(HomeEntry.Row("Porque você assistiu " + src.name, l.map { hcard(it) }, wide = true)) }
-        Discover.colls.forEach { c -> e.add(HomeEntry.Row(c.title, c.items.map { hcard(it) }, wide = true)) }
+        // Descobrir: porque você assistiu + coleções
+        Discover.because?.let { (src, l) -> e.add(HomeEntry.Row("Porque você assistiu " + src.name, l.map { card(it) })) }
+        Discover.colls.forEach { c -> e.add(HomeEntry.Row(c.title, c.items.map { card(it) })) }
         if (Trend.rows.isEmpty() && Trend.error != null) e.add(HomeEntry.Note("Top 10 das plataformas: não consegui falar com o TMDB (${Trend.error}). Tento de novo mais tarde."))
-        if (Repo.live.isNotEmpty()) e.add(HomeEntry.Row("Canais ao vivo", Repo.live.take(24).map { hcard(it) }, live = true))
-        if (movies.isNotEmpty()) e.add(HomeEntry.Row("Filmes adicionados recentemente", movies.take(30).map { hcard(it) }))
+        if (Repo.live.isNotEmpty()) e.add(HomeEntry.Row("Canais ao vivo", Repo.live.take(24).map { card(it) }, live = true))
+        if (movies.isNotEmpty()) e.add(HomeEntry.Row("Filmes adicionados recentemente", movies.take(30).map { card(it) }))
         val sers = Repo.recent(Repo.series)
-        if (sers.isNotEmpty()) e.add(HomeEntry.Row("Séries adicionadas recentemente", sers.take(30).map { hcard(it) }))
-        Repo.vodCats.take(6).forEach { c -> val l = Repo.vod.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row(c.name, l.map { hcard(it) })) }
-        Repo.serCats.take(3).forEach { c -> val l = Repo.series.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row("Séries · " + c.name, l.map { hcard(it) })) }
+        if (sers.isNotEmpty()) e.add(HomeEntry.Row("Séries adicionadas recentemente", sers.take(30).map { card(it) }))
+        Repo.vodCats.take(6).forEach { c -> val l = Repo.vod.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row(c.name, l.map { card(it) })) }
+        Repo.serCats.take(3).forEach { c -> val l = Repo.series.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row("Séries · " + c.name, l.map { card(it) })) }
         e.add(HomeEntry.Note("Sua lista: ${Repo.live.size} canais · ${Repo.vod.size} filmes · ${Repo.series.size} séries"))
         lastSig = libSig()
-
-        val frame = FrameLayout(this)
-        // imagem de fundo do topo (muda com a capa selecionada)
-        val bd = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0.6f }
-        frame.addView(bd, FrameLayout.LayoutParams(MATCH, dp(340), Gravity.TOP).apply { marginStart = dp(170) })
-        frame.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(C.bg, C.bg, 0xD90A0B0F.toInt(), 0x330A0B0F, 0x000A0B0F))
-        }, FrameLayout.LayoutParams(MATCH, dp(340), Gravity.TOP))
-        frame.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x000A0B0F, 0xCC0A0B0F.toInt(), C.bg))
-        }, FrameLayout.LayoutParams(MATCH, dp(150), Gravity.TOP).apply { topMargin = dp(190) })
-
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val top = FrameLayout(this).apply { tag = "hero" }
-        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM; setPadding(dp(40), dp(14), dp(40), dp(6)) }
-        val tagTv = text("", 11f, C.ac, true).apply { letterSpacing = 0.1f }
-        info.addView(tagTv)
-        val logo = ImageView(this).apply { adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START; visibility = View.GONE }
-        info.addView(logo, llp(dp(380), dp(78)).apply { topMargin = dp(8) })
-        val title = text("", 30f, Color.WHITE, true, 2).apply { setLineSpacing(0f, 0.95f) }
-        info.addView(title, llp(dp(560), WRAP).apply { topMargin = dp(6) })
-        val meta = text("", 13f, 0xFFD4D6DC.toInt(), false, 1)
-        info.addView(meta, llp(WRAP, WRAP).apply { topMargin = dp(8) })
-        val plot = text("", 13f, 0xFFC3C6CE.toInt(), false, 3).apply { setLineSpacing(0f, 1.25f) }
-        info.addView(plot, llp(dp(500), dp(52)).apply { topMargin = dp(8) })
-        val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; clipChildren = false; clipToPadding = false; setPadding(dp(2), dp(4), dp(2), dp(4)) }
-        fun withBillboard(b: TextView): TextView {
-            val old = b.onFocusChangeListener
-            b.setOnFocusChangeListener { v, f -> old?.onFocusChange(v, f); if (f) billboard() }
-            return b
-        }
-        btns.addView(withBillboard(button("▶  Assistir", true) {
-            val it = heroList.getOrNull(heroIdx)?.first ?: return@button
-            startActivity(Intent(this, PlayerActivity::class.java).putExtra("mode", "movie").putExtra("id", it.id).putExtra("ext", it.ext)
-                .putExtra("title", it.name).putExtra("key", it.key).putExtra("icon", it.icon).putExtra("name", it.name)
-                .putExtra("plot", it.plot).putExtra("img", Art.backdrop(it)))
-        }))
-        btns.addView(withBillboard(button("ⓘ  Mais informações") { heroList.getOrNull(heroIdx)?.first?.let { open(it) } }), llp(WRAP, WRAP).apply { marginStart = dp(12) })
-        btns.addView(withBillboard(button("Sortear filme") {
-            val pick = Discover.randomPick()
-            if (pick == null) Toast.makeText(this, "Nenhum filme para sortear", Toast.LENGTH_SHORT).show()
-            else { Toast.makeText(this, "Que tal: " + pick.name + "?", Toast.LENGTH_SHORT).show(); open(pick) }
-        }), llp(WRAP, WRAP).apply { marginStart = dp(12) })
-        val dots = text("", 12f, C.tx3)
-        btns.addView(dots, llp(WRAP, WRAP).apply { marginStart = dp(18) })
-        info.addView(btns, llp(WRAP, WRAP).apply { topMargin = dp(10) })
-        top.addView(info, FrameLayout.LayoutParams(MATCH, MATCH))
-        col.addView(top, llp(MATCH, dp(262)))
-
-        val rows = RecyclerView(this).apply {
+        return RecyclerView(this).apply {
             homeRv = this
-            layoutManager = SnapColLM(this@MainActivity)
+            layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = RowsAdapter(e)
             clipChildren = false; clipToPadding = false
-            setPadding(0, 0, 0, dp(220))
+            setPadding(0, 0, 0, dp(40))
             setItemViewCacheSize(6)
-        }
-        col.addView(rows, llp(MATCH, 0, 1f))
-        frame.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
-
-        panel = Panel(top, bd, tagTv, logo, title, meta, plot, btns, dots)
-        previewKey = null
-        heroMode = true
-        if (heroList.isNotEmpty()) showHero(0) else { btns.alpha = 1f; title.text = ""; }
-        startHeroTimer(frame)
-        frame.post { val f = currentFocus; if (tab == "home" && (f == null || !isInRail(f))) btns.getChildAt(0)?.requestFocus() }
-        return frame
-    }
-
-    private var heroTimer: Runnable? = null
-    private fun startHeroTimer(host: View) {
-        heroTimer?.let { host.removeCallbacks(it) }
-        val r = object : Runnable {
-            override fun run() {
-                if (host.isAttachedToWindow && heroMode && heroList.size > 1) showHero((heroIdx + 1) % heroList.size)
-                host.postDelayed(this, 12000)
-            }
-        }
-        heroTimer = r
-        host.postDelayed(r, 12000)
-    }
-
-    /** volta para o destaque (quando o foco está nos botões do topo) */
-    private fun billboard() {
-        val p = panel ?: return
-        p.btns.animate().alpha(1f).setDuration(200).start()
-        if (heroMode) return
-        heroMode = true
-        previewKey = null
-        if (heroList.isNotEmpty()) showHero(heroIdx)
-    }
-
-    private fun showHero(i: Int) {
-        val (it, label) = heroList.getOrNull(i) ?: return
-        heroIdx = i
-        fillPanel(it, "FILME · $label")
-        panel?.dots?.text = if (heroList.size > 1) heroList.indices.joinToString(" ") { d -> if (d == i) "●" else "○" } else ""
-    }
-
-    /** mostra no topo o título com a capa selecionada */
-    private fun preview(it: Item) {
-        val p = panel ?: return
-        if (heroMode) { heroMode = false; p.btns.animate().alpha(0f).setDuration(200).start() }
-        if (previewKey == it.key) return
-        val kind = when (it.kind) { Kind.MOVIE -> "FILME"; Kind.SERIES -> "SÉRIE"; Kind.LIVE -> "AO VIVO" }
-        val cat = Repo.catName(it.kind, it.cat)
-        fillPanel(it, kind + if (cat.isNotEmpty()) " · " + cat.uppercase() else "")
-        p.dots.text = ""
-    }
-
-    private fun fillPanel(it: Item, tagText: String) {
-        val p = panel ?: return
-        previewKey = it.key
-        p.tag.text = tagText
-        val m = ArrayList<String>()
-        scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
-        if (it.year > 0) m.add(it.year.toString())
-        if (it.genre.isNotEmpty()) m.add(it.genre.split(",").take(2).joinToString(", ") { g -> g.trim() })
-        val now = System.currentTimeMillis() / 1000
-        if (it.added > 0 && now - it.added in 0..(7L * 24 * 3600)) m.add(if (it.kind == Kind.SERIES) "Novos episódios" else "Novidade")
-        if (it.kind == Kind.LIVE && it.num.isNotEmpty()) m.add("Canal " + it.num)
-        p.meta.text = m.joinToString("   ")
-        p.plot.text = it.plot
-        // logo e imagem larga: usa o que já tem guardado e busca o resto em seguida
-        val cached = Discover.artCached(it)
-        showLogo(cached?.logo ?: "", it.name)
-        val bdUrl = Art.backdrop(it).ifEmpty { cached?.backdrop ?: "" }.ifEmpty { if (it.kind == Kind.LIVE) "" else it.icon }
-        if (bdUrl.isNotEmpty()) p.bd.load(bdUrl) { crossfade(350) } else p.bd.setImageDrawable(null)
-        previewJob?.cancel()
-        if (it.kind == Kind.LIVE) return
-        previewJob = lifecycleScope.launch {
-            delay(400)
-            val a = if (cached == null) withContext(Dispatchers.IO) { try { Discover.art(it) } catch (e: Exception) { null } } else cached
-            if (previewKey != it.key) return@launch
-            if (a != null) {
-                if (a.logo.isNotEmpty()) showLogo(a.logo, it.name)
-                if (cached == null && a.backdrop.isNotEmpty() && Art.backdrop(it).isEmpty()) p.bd.load(a.backdrop) { crossfade(350) }
-            }
-            if (it.plot.isEmpty() && it.kind == Kind.MOVIE) {
-                val pl = withContext(Dispatchers.IO) { try { Repo.vodInfo(it.id).s("plot") } catch (e: Exception) { "" } }
-                if (pl.isNotEmpty()) { it.plot = pl; if (previewKey == it.key) p.plot.text = pl }
-            }
-        }
-    }
-
-    /** logo oficial do título no lugar do nome escrito (quando existe) */
-    private fun showLogo(url: String, name: String) {
-        val p = panel ?: return
-        p.title.text = name
-        if (url.isEmpty()) { p.logo.visibility = View.GONE; p.title.visibility = View.VISIBLE; return }
-        p.logo.load(url) {
-            crossfade(250)
-            listener(onSuccess = { _, _ -> p.logo.visibility = View.VISIBLE; p.title.visibility = View.GONE },
-                onError = { _, _ -> p.logo.visibility = View.GONE; p.title.visibility = View.VISIBLE })
         }
     }
 
@@ -648,6 +436,86 @@ class MainActivity : ComponentActivity() {
         // começa num destaque diferente a cada vez que abre
         val start = (System.currentTimeMillis() / 1000 % top.size).toInt()
         return top.drop(start) + top.take(start)
+    }
+
+    private var heroTimer: Runnable? = null
+
+    private fun heroView(list: List<Pair<Item, String>>): View {
+        val f = FrameLayout(this).apply { layoutParams = ViewGroup.LayoutParams(MATCH, dp(300)); tag = "hero" }
+        val bd = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0.45f }
+        f.addView(bd, FrameLayout.LayoutParams(MATCH, MATCH).apply { marginStart = dp(260) })
+        f.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(C.bg, C.bg, 0xCC0A0B0F.toInt(), 0x000A0B0F))
+        }, FrameLayout.LayoutParams(MATCH, MATCH))
+        f.addView(View(this).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(C.bg, 0x000A0B0F)) }, FrameLayout.LayoutParams(MATCH, dp(90), Gravity.BOTTOM))
+        val poster = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = rounded(C.bg3, dpf(10f)); clipToOutline = true
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            elevation = dpf(12f)
+        }
+        f.addView(poster, FrameLayout.LayoutParams(dp(150), dp(225), Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(70) })
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM; setPadding(dp(40), 0, 0, dp(18)) }
+        val tag = text("", 11f, C.ac, true).apply { letterSpacing = 0.1f }
+        col.addView(tag)
+        val title = text("", 36f, Color.WHITE, true, 2).apply { setLineSpacing(0f, 0.95f) }
+        col.addView(title, llp(dp(520), WRAP).apply { topMargin = dp(8) })
+        val meta = text("", 13f, 0xFFD4D6DC.toInt())
+        col.addView(meta, llp(WRAP, WRAP).apply { topMargin = dp(10) })
+        val plot = text("", 13f, 0xFFC3C6CE.toInt(), false, 3).apply { setLineSpacing(0f, 1.25f) }
+        col.addView(plot, llp(dp(480), WRAP).apply { topMargin = dp(10) })
+        val dots = text("", 12f, C.tx3)
+        var idx = 0
+        val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        btns.addView(button("▶  Assistir", true) {
+            val it = list[idx].first
+            startActivity(Intent(this, PlayerActivity::class.java).putExtra("mode", "movie").putExtra("id", it.id).putExtra("ext", it.ext)
+                .putExtra("title", it.name).putExtra("key", it.key).putExtra("icon", it.icon).putExtra("name", it.name)
+                .putExtra("plot", it.plot).putExtra("img", Art.backdrop(it)))
+        })
+        btns.addView(button("ⓘ  Mais informações") { open(list[idx].first) }, llp(WRAP, WRAP).apply { marginStart = dp(12) })
+        btns.addView(button("Sortear filme") {
+            val pick = Discover.randomPick()
+            if (pick == null) Toast.makeText(this, "Nenhum filme para sortear", Toast.LENGTH_SHORT).show()
+            else { Toast.makeText(this, "Que tal: " + pick.name + "?", Toast.LENGTH_SHORT).show(); open(pick) }
+        }, llp(WRAP, WRAP).apply { marginStart = dp(12) })
+        btns.addView(dots, llp(WRAP, WRAP).apply { marginStart = dp(18) })
+        col.addView(btns, llp(WRAP, WRAP).apply { topMargin = dp(16) })
+        f.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        fun showHero(i: Int) {
+            idx = i
+            val (it, label) = list[i]
+            tag.text = "FILME · $label"
+            title.text = it.name
+            val m = ArrayList<String>()
+            scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
+            if (it.year > 0) m.add(it.year.toString())
+            Repo.catName(Kind.MOVIE, it.cat).takeIf { c -> c.isNotEmpty() }?.let { c -> m.add(c) }
+            meta.text = m.joinToString("   ")
+            plot.text = it.plot
+            if (it.icon.isNotEmpty()) { bd.load(it.icon) { crossfade(400) }; poster.load(it.icon) { crossfade(400) }; poster.visibility = View.VISIBLE }
+            else { bd.setImageDrawable(null); poster.visibility = View.GONE }
+            dots.text = if (list.size > 1) list.indices.joinToString(" ") { d -> if (d == i) "●" else "○" } else ""
+            if (it.plot.isEmpty()) lifecycleScope.launch {
+                val p = withContext(Dispatchers.IO) { try { Repo.vodInfo(it.id).s("plot") } catch (e: Exception) { "" } }
+                if (p.isNotEmpty()) { it.plot = p; if (idx == i) plot.text = p }
+            }
+        }
+        showHero(0)
+        // troca o destaque sozinho a cada 12 segundos
+        heroTimer?.let { f.removeCallbacks(it) }
+        if (list.size > 1) {
+            val r = object : Runnable {
+                override fun run() {
+                    if (f.isAttachedToWindow && f.isShown) showHero((idx + 1) % list.size)
+                    f.postDelayed(this, 12000)
+                }
+            }
+            heroTimer = r
+            f.postDelayed(r, 12000)
+        }
+        return f
     }
 
     /* ---------- Ao vivo / Filmes / Séries ---------- */
@@ -765,7 +633,9 @@ class MainActivity : ComponentActivity() {
     private fun myListView(): View {
         val e = ArrayList<HomeEntry>()
         val cont = Lib.progs().filter { it.dur > 0 }.take(30)
-        if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", cont.map { contCard(it) }, wide = true))
+        if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", cont.map { p ->
+            Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct) { resume(p) }
+        }))
         val favs = Lib.favs().mapNotNull { Repo.findKey(it) }
         favs.filter { it.kind == Kind.MOVIE }.takeIf { it.isNotEmpty() }?.let { l -> e.add(HomeEntry.Row("Filmes na minha lista", l.map { card(it) })) }
         favs.filter { it.kind == Kind.SERIES }.takeIf { it.isNotEmpty() }?.let { l -> e.add(HomeEntry.Row("Séries na minha lista", l.map { card(it) })) }
@@ -776,10 +646,10 @@ class MainActivity : ComponentActivity() {
         lastSig = libSig()
         return RecyclerView(this).apply {
             homeRv = this
-            layoutManager = SnapColLM(this@MainActivity)
+            layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = RowsAdapter(e)
             clipChildren = false; clipToPadding = false
-            setPadding(0, dp(16), 0, dp(220))
+            setPadding(0, dp(6), 0, dp(40))
         }
     }
 
