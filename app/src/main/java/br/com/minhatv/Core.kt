@@ -487,17 +487,18 @@ object Repo {
 /* ================= minha lista, assistidos e progresso ================= */
 class Prog(
     val key: String, val name: String, val sub: String, val icon: String, val pos: Long, val dur: Long,
-    val kind: String, val id: String, val ext: String, val sid: String, val t: Long
+    val kind: String, val id: String, val ext: String, val sid: String, val t: Long,
+    val img: String = "", val ept: String = ""
 ) {
     fun json() = JSONObject().put("key", key).put("name", name).put("sub", sub).put("icon", icon).put("pos", pos).put("dur", dur)
-        .put("kind", kind).put("id", id).put("ext", ext).put("sid", sid).put("t", t)
+        .put("kind", kind).put("id", id).put("ext", ext).put("sid", sid).put("t", t).put("img", img).put("ept", ept)
 
     val pct: Int get() = if (dur > 0) (pos * 100 / dur).toInt().coerceIn(0, 100) else 0
 
     companion object {
         fun of(o: JSONObject) = Prog(
             o.s("key"), o.s("name"), o.s("sub"), o.s("icon"), o.optLong("pos"), o.optLong("dur"),
-            o.s("kind"), o.s("id"), o.s("ext"), o.s("sid"), o.optLong("t")
+            o.s("kind"), o.s("id"), o.s("ext"), o.s("sid"), o.optLong("t"), o.s("img"), o.s("ept")
         )
     }
 }
@@ -548,6 +549,15 @@ object Lib {
 
     fun saveProg(p: Prog) = saveProgs((listOf(p) + progs().filter { it.key != p.key }).take(60))
     fun dropProg(k: String) = saveProgs(progs().filter { it.key != k })
+}
+
+/* ================= imagens largas (fundo) e logos dos títulos ================= */
+object Art {
+    const val IMG = "https://image.tmdb.org/t/p/"
+    /** imagem larga (16:9) por chave do item, vinda do TMDB */
+    val bd = HashMap<String, String>()
+    fun backdrop(it: Item?): String = if (it == null) "" else bd[it.key] ?: ""
+    fun put(it: Item, path: String) { if (path.isNotEmpty() && !bd.containsKey(it.key)) bd[it.key] = IMG + "w780" + path }
 }
 
 /* ================= Top 10 das plataformas (TMDB, Brasil) ================= */
@@ -620,6 +630,7 @@ object Trend {
                                     .put("y", date.take(4).toIntOrNull() ?: 0)
                                     .put("pop", r.optDouble("popularity", 0.0))
                                     .put("va", r.optDouble("vote_average", 0.0))
+                                    .put("bd", r.s("backdrop_path"))
                             )
                         }
                     } catch (e: Exception) {}
@@ -628,13 +639,13 @@ object Trend {
             }
             out.put(po)
         }
-        return JSONObject().put("v", 2).put("t", System.currentTimeMillis()).put("plats", out)
+        return JSONObject().put("v", 3).put("t", System.currentTimeMillis()).put("plats", out)
     }
 
     /** usa o guardado; busca de novo se tiver mais de 6 horas (ou se force) */
     fun ensure(force: Boolean = false) {
         var raw = try { Store.str("trend")?.let { JSONObject(it) } } catch (e: Exception) { null }
-        val stale = raw == null || raw.optInt("v") < 2 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
+        val stale = raw == null || raw.optInt("v") < 3 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
         if (force || stale) {
             try {
                 raw = fetchRaw()
@@ -653,7 +664,7 @@ object Trend {
 
     fun isStale(): Boolean {
         val raw = try { Store.str("trend")?.let { JSONObject(it) } } catch (e: Exception) { null }
-        return raw == null || raw.optInt("v") < 2 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
+        return raw == null || raw.optInt("v") < 3 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
     }
 
     class Idx(list: List<Item>) {
@@ -701,7 +712,7 @@ object Trend {
                 val items = ArrayList<Item>()
                 list.forEach { x ->
                     val it = find(if (kind == Kind.MOVIE) iv else isr, x.s("id"), x.s("t"), x.s("ot"), x.optInt("y"))
-                    if (it != null && seen.add(it.id)) { items.add(it); x.optDouble("va", 0.0).takeIf { v -> v > 0 }?.let { v -> vt[it.key] = v } }
+                    if (it != null && seen.add(it.id)) { items.add(it); x.optDouble("va", 0.0).takeIf { v -> v > 0 }?.let { v -> vt[it.key] = v }; Art.put(it, x.s("bd")) }
                 }
                 if (items.isNotEmpty()) res.add(Row(plat, kind, items))
             }

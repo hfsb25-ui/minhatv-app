@@ -55,7 +55,7 @@ object Discover {
             val ot = r.s("original_title").ifEmpty { r.s("original_name") }
             val y = (r.s("release_date").ifEmpty { r.s("first_air_date") }).take(4).toIntOrNull() ?: 0
             val it = Trend.find(idx(kind), r.s("id"), t, ot, y)
-            if (it != null && seen.add(it.id)) out.add(it)
+            if (it != null && seen.add(it.id)) { out.add(it); Art.put(it, r.s("backdrop_path")) }
         }
         return out
     }
@@ -133,6 +133,41 @@ object Discover {
         return Extra(trailer, cert, cast, similar, o.s("overview"), bd, runtime, genres)
     }
 
+    /* ---------- logo oficial e imagem larga de um título (para o topo da tela) ---------- */
+    class ArtInfo(val logo: String, val backdrop: String)
+    private val artCache: JSONObject by lazy { try { JSONObject(Store.str("tmdbart") ?: "{}") } catch (e: Exception) { JSONObject() } }
+
+    fun artCached(it: Item): ArtInfo? = artCache.optJSONObject(it.key)?.let { o -> ArtInfo(o.s("l"), o.s("b")) }
+
+    fun art(it: Item): ArtInfo? {
+        artCached(it)?.let { return it }
+        if (it.kind == Kind.LIVE) return null
+        val id = tmdbId(it) ?: run { saveArt(it, "", ""); return null }
+        val movie = it.kind != Kind.SERIES
+        val o = try { Trend.tm((if (movie) "movie/" else "tv/") + id + "/images", mapOf("include_image_language" to "pt,en,null")) } catch (e: Exception) { return null }
+        var logo = ""
+        o.optJSONArray("logos")?.let { a ->
+            val l = (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+            val best = l.firstOrNull { x -> x.s("iso_639_1") == "pt" } ?: l.firstOrNull { x -> x.s("iso_639_1") == "en" } ?: l.firstOrNull()
+            best?.s("file_path")?.takeIf { p -> p.isNotEmpty() }?.let { p -> logo = IMG + "w500" + p.replace(".svg", ".png") }
+        }
+        var bd = ""
+        o.optJSONArray("backdrops")?.let { a ->
+            val l = (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+            val best = l.firstOrNull { x -> x.s("iso_639_1").isEmpty() || x.s("iso_639_1") == "null" } ?: l.firstOrNull()
+            best?.s("file_path")?.takeIf { p -> p.isNotEmpty() }?.let { p -> bd = IMG + "w1280" + p }
+        }
+        saveArt(it, logo, bd)
+        return ArtInfo(logo, bd)
+    }
+
+    private fun saveArt(it: Item, logo: String, bd: String) {
+        artCache.put(it.key, JSONObject().put("l", logo).put("b", bd))
+        // guarda só os últimos ~400 títulos
+        if (artCache.length() > 450) { val ks = artCache.keys().asSequence().toList(); ks.take(ks.size - 400).forEach { k -> artCache.remove(k) } }
+        Store.put("tmdbart", artCache.toString())
+    }
+
     /* ---------- coleções e "porque você assistiu" ---------- */
     fun isStale(): Boolean {
         val raw = try { Store.str("disc")?.let { JSONObject(it) } } catch (e: Exception) { null }
@@ -170,7 +205,8 @@ object Discover {
                             val x = res.optJSONObject(i) ?: continue
                             items.put(JSONObject().put("id", x.s("id")).put("title", x.s("title")).put("name", x.s("name"))
                                 .put("original_title", x.s("original_title")).put("original_name", x.s("original_name"))
-                                .put("release_date", x.s("release_date")).put("first_air_date", x.s("first_air_date")))
+                                .put("release_date", x.s("release_date")).put("first_air_date", x.s("first_air_date"))
+                                .put("backdrop_path", x.s("backdrop_path")))
                         }
                     } catch (e: Exception) {}
                 }

@@ -14,7 +14,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.ImageView
 import android.widget.Toast
+import coil.load
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
@@ -50,6 +52,26 @@ class PlayerActivity : ComponentActivity() {
     private var name = ""
     private var sub = ""
     private var sid = ""
+    private var plot = ""
+    private var img = ""
+    private var ept = ""
+    private var introSkipped = false
+    private var nextShown = false
+    private var nextCancelled = false
+    private var countdown = 10
+    private lateinit var skipBtn: TextView
+    private lateinit var nextBox: LinearLayout
+    private lateinit var nextImg: ImageView
+    private lateinit var nextTitle: TextView
+    private lateinit var nextCount: TextView
+    private lateinit var pauseBox: LinearLayout
+    private lateinit var pauseTitle: TextView
+    private lateinit var pauseSub: TextView
+    private lateinit var pausePlot: TextView
+    private val ticker = object : Runnable {
+        override fun run() { tick(); h.postDelayed(this, 500) }
+    }
+    private val showPause = Runnable { if (::pauseBox.isInitialized && player?.playWhenReady == false && mode != "live") { fillPause(); pauseBox.visibility = View.VISIBLE; pauseBox.alpha = 0f; pauseBox.animate().alpha(1f).setDuration(400).start() } }
     private var triedHls = false
     private var chIndex = 0
     private val h = Handler(Looper.getMainLooper())
@@ -78,6 +100,9 @@ class PlayerActivity : ComponentActivity() {
         name = intent.getStringExtra("name") ?: title
         sub = intent.getStringExtra("sub") ?: ""
         sid = intent.getStringExtra("sid") ?: ""
+        plot = intent.getStringExtra("plot") ?: ""
+        img = intent.getStringExtra("img") ?: ""
+        ept = intent.getStringExtra("ept") ?: ""
         if (mode == "live") {
             chIndex = Now.channels.indexOfFirst { it.id == id }.coerceAtLeast(0)
             Now.channels.getOrNull(chIndex)?.let { title = (if (it.num.isNotEmpty()) it.num + " · " else "") + it.name; key = it.key }
@@ -126,6 +151,49 @@ class PlayerActivity : ComponentActivity() {
         row.addView(text("▲▼ trocar de canal   ·   Voltar para sair", 12f, C.tx3).apply { gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT).apply { marginStart = dp(18) })
         panel.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
         root.addView(panel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+
+        // tela de pausa com informações (como na Netflix)
+        pauseBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(64), dp(40), dp(64), dp(40))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xE6000000.toInt(), 0xB3000000.toInt(), 0x66000000))
+            visibility = View.GONE
+        }
+        pauseBox.addView(text("Você está assistindo", 14f, C.tx2))
+        pauseTitle = text("", 34f, Color.WHITE, true, 2)
+        pauseBox.addView(pauseTitle, LinearLayout.LayoutParams(dp(600), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        pauseSub = text("", 16f, 0xFFD4D6DC.toInt(), true, 1)
+        pauseBox.addView(pauseSub, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        pausePlot = text("", 15f, 0xFFC3C6CE.toInt(), false, 4).apply { setLineSpacing(0f, 1.3f) }
+        pauseBox.addView(pausePlot, LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
+        pauseBox.addView(text("Aperte OK para continuar", 12f, C.tx3), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(22) })
+        root.addView(pauseBox, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+        // botão "Pular abertura"
+        skipBtn = text("Pular abertura  ▸", 15f, Color.BLACK, true).apply {
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            background = rounded(Color.WHITE, dpf(6f))
+            visibility = View.GONE
+        }
+        root.addView(skipBtn, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(40), dp(90)) })
+
+        // "Próximo episódio em 10s"
+        nextBox = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(10), dp(16), dp(10))
+            background = rounded(0xF2141820.toInt(), dpf(10f), dp(1), C.line)
+            visibility = View.GONE
+        }
+        nextImg = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; background = rounded(C.bg3, dpf(6f)); clipToOutline = true; outlineProvider = android.view.ViewOutlineProvider.BACKGROUND }
+        nextBox.addView(nextImg, LinearLayout.LayoutParams(dp(150), dp(84)))
+        val nc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
+        nextCount = text("", 13f, C.ac, true)
+        nextTitle = text("", 15f, Color.WHITE, true, 2)
+        nc.addView(nextCount)
+        nc.addView(nextTitle, LinearLayout.LayoutParams(dp(230), LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        nc.addView(text("OK assistir agora  ·  Voltar cancelar", 11f, C.tx3), LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        nextBox.addView(nc)
+        root.addView(nextBox, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(40), dp(90)) })
         setContentView(root)
     }
 
@@ -143,6 +211,12 @@ class PlayerActivity : ComponentActivity() {
             .setLoadControl(load)
             .build()
         p.addListener(object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                h.removeCallbacks(showPause)
+                if (playWhenReady) { if (pauseBox.visibility == View.VISIBLE) pauseBox.animate().alpha(0f).setDuration(200).withEndAction { pauseBox.visibility = View.GONE }.start() }
+                else h.postDelayed(showPause, 1500)
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 spin.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
                 if (state == Player.STATE_READY) errTv.visibility = View.GONE
@@ -170,6 +244,10 @@ class PlayerActivity : ComponentActivity() {
 
     private fun play(start: Long) {
         triedHls = false
+        introSkipped = false; nextShown = false; nextCancelled = false
+        if (::skipBtn.isInitialized) { skipBtn.visibility = View.GONE; nextBox.visibility = View.GONE; pauseBox.visibility = View.GONE }
+        h.removeCallbacks(ticker)
+        if (mode != "live") h.postDelayed(ticker, 1000)
         errTv.visibility = View.GONE
         topTitle.text = title
         showTitle()
@@ -255,7 +333,7 @@ class PlayerActivity : ComponentActivity() {
         if (dur <= 60000 || dur == androidx.media3.common.C.TIME_UNSET) return
         if (!force && pos < 10000) return
         if (pos.toDouble() / dur >= 0.92 || dur - pos < 120000) { if (!Lib.isSeen(key)) Lib.setSeen(key, true); return }
-        Lib.saveProg(Prog(key, name, sub, icon, pos, dur, if (mode == "episode") "series" else "movie", id, ext, sid, System.currentTimeMillis()))
+        Lib.saveProg(Prog(key, name, sub, icon, pos, dur, if (mode == "episode") "series" else "movie", id, ext, sid, System.currentTimeMillis(), img, ept))
     }
 
     private fun onEnded() {
@@ -268,19 +346,84 @@ class PlayerActivity : ComponentActivity() {
                 val n = eps[i + 1]
                 val s = Now.series
                 Toast.makeText(this, "Próximo episódio: T${n.season} E${n.num}", Toast.LENGTH_SHORT).show()
-                id = n.id; ext = n.ext; key = "e" + n.id; sub = "T${n.season} E${n.num}"
-                title = (s?.name ?: name) + " · " + sub + if (n.title.isNotEmpty()) " — ${n.title}" else ""
-                h.postDelayed({ play(0) }, 1500)
+                if (nextCancelled) { finish(); return }
+                goNext(n, s, if (nextShown) 0L else 1500L)
                 return
             }
         }
         finish()
     }
 
+    private fun nextEpisode(): Episode? {
+        if (mode != "episode") return null
+        val eps = Now.episodes
+        val i = eps.indexOfFirst { it.id == id }
+        return if (i >= 0 && i + 1 < eps.size) eps[i + 1] else null
+    }
+
+    private fun goNext(n: Episode, s: Item?, delayMs: Long) {
+        id = n.id; ext = n.ext; key = "e" + n.id; sub = "T${n.season} E${n.num}"
+        plot = n.plot; img = n.image; ept = n.title
+        title = (s?.name ?: name) + " · " + sub + if (n.title.isNotEmpty()) " — ${n.title}" else ""
+        if (delayMs > 0) h.postDelayed({ play(0) }, delayMs) else play(0)
+    }
+
+    /** a cada meio segundo: "Pular abertura" e "Próximo episódio em 10s" */
+    private fun tick() {
+        val p = player ?: return
+        val pos = p.currentPosition
+        val dur = p.duration
+        // pular abertura: nos primeiros minutos do episódio (pula 85 segundos)
+        val showSkip = mode == "episode" && !introSkipped && pos in 15000..200000 && p.isPlaying
+        if (showSkip != (skipBtn.visibility == View.VISIBLE)) skipBtn.visibility = if (showSkip) View.VISIBLE else View.GONE
+        // próximo episódio: nos últimos 30 segundos
+        val n = nextEpisode()
+        if (n != null && dur > 120000 && dur != androidx.media3.common.C.TIME_UNSET && !nextCancelled) {
+            val left = dur - pos
+            if (left in 1..30000 && p.isPlaying && !nextShown) {
+                nextShown = true; countdown = 10
+                nextTitle.text = "T${n.season} E${n.num}" + if (n.title.isNotEmpty()) " · ${n.title}" else ""
+                if (n.image.isNotEmpty()) nextImg.load(n.image) { crossfade(200) } else nextImg.setImageDrawable(null)
+                nextBox.visibility = View.VISIBLE
+                nextBox.alpha = 0f; nextBox.animate().alpha(1f).setDuration(300).start()
+                h.post(countdownTick)
+            }
+        }
+    }
+
+    private val countdownTick = object : Runnable {
+        override fun run() {
+            if (!nextShown || nextCancelled || nextBox.visibility != View.VISIBLE) return
+            nextCount.text = "Próximo episódio em $countdown"
+            if (countdown <= 0) { nextEpisode()?.let { saveProg(true); if (!Lib.isSeen(key)) Lib.setSeen(key, true); goNext(it, Now.series, 0) }; return }
+            countdown--
+            h.postDelayed(this, 1000)
+        }
+    }
+
+    private fun fillPause() {
+        pauseTitle.text = if (mode == "episode") name else title
+        pauseSub.text = if (mode == "episode") sub + if (ept.isNotEmpty()) " · $ept" else "" else ""
+        pauseSub.visibility = if (pauseSub.text.isEmpty()) View.GONE else View.VISIBLE
+        pausePlot.text = plot
+    }
+
     /* ---------- controle remoto ---------- */
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (e.action == KeyEvent.ACTION_DOWN) {
             val k = e.keyCode
+            val ok = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER
+            // próximo episódio aparecendo: OK assiste agora, Voltar cancela
+            if (::nextBox.isInitialized && nextBox.visibility == View.VISIBLE) {
+                if (ok) { nextEpisode()?.let { saveProg(true); if (!Lib.isSeen(key)) Lib.setSeen(key, true); goNext(it, Now.series, 0) }; return true }
+                if (k == KeyEvent.KEYCODE_BACK) { nextCancelled = true; nextBox.visibility = View.GONE; return true }
+            }
+            // "Pular abertura" na tela: OK pula
+            if (::skipBtn.isInitialized && skipBtn.visibility == View.VISIBLE && ok && !pv.isControllerFullyVisible) {
+                player?.let { it.seekTo(it.currentPosition + 85000) }
+                introSkipped = true; skipBtn.visibility = View.GONE
+                return true
+            }
             if (mode == "live") {
                 when (k) {
                     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> { zap(1); return true }
@@ -321,6 +464,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         h.removeCallbacksAndMessages(null)
+        h.removeCallbacks(ticker)
         player?.release()
         player = null
         super.onDestroy()

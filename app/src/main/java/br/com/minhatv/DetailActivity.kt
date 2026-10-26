@@ -176,6 +176,7 @@ class DetailActivity : ComponentActivity() {
         startActivity(
             Intent(this, PlayerActivity::class.java).putExtra("mode", "movie").putExtra("id", item.id).putExtra("ext", item.ext)
                 .putExtra("title", item.name).putExtra("key", item.key).putExtra("icon", item.icon).putExtra("name", item.name).putExtra("start", start)
+                .putExtra("plot", item.plot).putExtra("img", Art.backdrop(item).ifEmpty { Discover.artCached(item)?.backdrop ?: "" })
         )
     }
 
@@ -341,6 +342,7 @@ class DetailActivity : ComponentActivity() {
                 .putExtra("title", "${item.name} · T${ep.season} E${ep.num}" + if (ep.title.isNotEmpty()) " — ${ep.title}" else "")
                 .putExtra("key", "e" + ep.id).putExtra("icon", item.icon).putExtra("name", item.name).putExtra("sub", "T${ep.season} E${ep.num}")
                 .putExtra("sid", item.id).putExtra("start", start)
+                .putExtra("plot", ep.plot.ifEmpty { item.plot }).putExtra("img", ep.image.ifEmpty { Art.backdrop(item) }).putExtra("ept", ep.title)
         )
     }
 
