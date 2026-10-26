@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
     private var shownVersion = -1
     private var lastBack = 0L
     private val openedAt = System.currentTimeMillis()
+    private var fastStart = false
+    private var homeRv: RecyclerView? = null
+    private var lastSig = ""
     private var epgJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +68,9 @@ class MainActivity : ComponentActivity() {
             window.decorView.postDelayed({ startActivity(Intent(this, LoginActivity::class.java)); finish() }, 1800)
             return
         }
+        // se a tela foi recriada (o sistema fechou para liberar memória), volta sem abertura e na mesma aba
+        fastStart = savedInstanceState != null || Repo.vod.isNotEmpty() || Repo.live.isNotEmpty()
+        savedInstanceState?.getString("tab")?.let { tab = it }
         buildShell()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -75,6 +81,11 @@ class MainActivity : ComponentActivity() {
             }
         })
         start()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("tab", tab)
     }
 
     override fun onResume() {
@@ -101,7 +112,7 @@ class MainActivity : ComponentActivity() {
             val hasCache = Repo.vod.isNotEmpty() || Repo.live.isNotEmpty() || withContext(Dispatchers.IO) { try { Repo.loadCache() } catch (e: Throwable) { false } }
             if (hasCache) {
                 withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {}; try { Discover.loadCached() } catch (e: Exception) {} }
-                showAccount(); show("home"); setLoading(null)
+                showAccount(); show(tab); setLoading(null)
                 // atualiza por trás se o catálogo guardado tiver mais de 2 horas
                 if (Repo.cacheAge() > 2 * 3600 * 1000L) refreshInBackground()
                 else refreshTrend()
@@ -114,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 } catch (e: Throwable) { goLogin(if (e is OutOfMemoryError) "A lista é grande demais para a memória deste aparelho." else (e.message ?: "Não consegui baixar a lista.")); return@launch }
                 setLoading("Buscando o que está em alta…")
                 withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {}; try { Discover.loadCached() } catch (e: Exception) {} }
-                showAccount(); show("home"); setLoading(null)
+                showAccount(); show(tab); setLoading(null)
             }
         }
     }
@@ -185,7 +196,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setLoading(msg: String?) {
         if (msg == null) {
-            val wait = 1800 - (System.currentTimeMillis() - openedAt)
+            val wait = if (fastStart) 0L else 1800 - (System.currentTimeMillis() - openedAt)
             if (wait > 0) loading.postDelayed({ loading.visibility = View.GONE }, wait) else loading.visibility = View.GONE
         } else { loading.visibility = View.VISIBLE; loadingTxt.text = msg }
     }
@@ -258,10 +269,41 @@ class MainActivity : ComponentActivity() {
         render(false)
     }
 
+    /** resumo do que muda ao assistir/favoritar (para só redesenhar quando precisa) */
+    private fun libSig(): String =
+        Lib.progs().take(6).joinToString(",") { it.key + ":" + it.pct } + "|" + Lib.favs().take(30).joinToString(",") + "|" + Lib.seenKeys('m').size
+
     private fun refreshCurrent() {
         if (tab == "home" || tab == "mylist") {
-            val f = currentFocus
-            render(keepFocus = f != null && f.parent === tabs)
+            val sig = libSig()
+            val rv = homeRv
+            if (sig == lastSig || rv == null) {
+                // nada mudou: só atualiza os selos das capas, sem mexer na posição
+                rv?.let { r -> for (i in 0 until r.childCount) ((r.getChildAt(i) as? ViewGroup)?.getChildAt(1) as? RecyclerView)?.adapter?.notifyDataSetChanged() }
+                return
+            }
+            // mudou (ex.: novo "continuar assistindo"): redesenha mantendo a rolagem e o foco
+            val state = rv.layoutManager?.onSaveInstanceState()
+            var rowPos = -1
+            var cardPos = -1
+            currentFocus?.let { f ->
+                var v: View? = f
+                var child: View? = null
+                while (v != null && v.parent !== rv) { if ((v.parent as? RecyclerView) != null && v.parent !== rv) child = v; v = v.parent as? View }
+                if (v != null) rowPos = rv.getChildAdapterPosition(v)
+                child?.let { c -> (c.parent as? RecyclerView)?.let { inner -> cardPos = inner.getChildAdapterPosition(c) } }
+            }
+            render(false)
+            val nrv = homeRv ?: return
+            state?.let { nrv.layoutManager?.onRestoreInstanceState(it) }
+            if (rowPos >= 0) nrv.post {
+                val row = nrv.findViewHolderForAdapterPosition(rowPos)?.itemView
+                val inner = (row as? ViewGroup)?.getChildAt(1) as? RecyclerView
+                if (inner != null && cardPos >= 0) {
+                    inner.scrollToPosition(cardPos)
+                    inner.post { (inner.findViewHolderForAdapterPosition(cardPos)?.itemView ?: inner.getChildAt(0))?.requestFocus() }
+                } else row?.requestFocus()
+            }
         } else {
             // só atualiza os selos das capas
             content.findViewWithTag<RecyclerView>("grid")?.adapter?.notifyDataSetChanged()
@@ -270,6 +312,7 @@ class MainActivity : ComponentActivity() {
 
     private fun render(keepFocus: Boolean) {
         shownVersion = Repo.version
+        homeRv = null
         content.removeAllViews()
         try {
             when (tab) {
@@ -342,7 +385,9 @@ class MainActivity : ComponentActivity() {
         Repo.vodCats.take(6).forEach { c -> val l = Repo.vod.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row(c.name, l.map { card(it) })) }
         Repo.serCats.take(3).forEach { c -> val l = Repo.series.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row("Séries · " + c.name, l.map { card(it) })) }
         e.add(HomeEntry.Note("Sua lista: ${Repo.live.size} canais · ${Repo.vod.size} filmes · ${Repo.series.size} séries"))
+        lastSig = libSig()
         return RecyclerView(this).apply {
+            homeRv = this
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = RowsAdapter(e)
             clipChildren = false; clipToPadding = false
@@ -587,7 +632,9 @@ class MainActivity : ComponentActivity() {
         val seen = Lib.seenKeys('m').mapNotNull { Repo.findKey(it) }.take(40)
         if (seen.isNotEmpty()) e.add(HomeEntry.Row("Filmes que você já assistiu", seen.map { card(it) }))
         if (e.isEmpty()) e.add(HomeEntry.Note("Sua lista está vazia.\nAbra um filme ou série e aperte \"Minha lista\". Nos canais, aperte OK enquanto assiste e escolha \"Favoritar\"."))
+        lastSig = libSig()
         return RecyclerView(this).apply {
+            homeRv = this
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = RowsAdapter(e)
             clipChildren = false; clipToPadding = false
