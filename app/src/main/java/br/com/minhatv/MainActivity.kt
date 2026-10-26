@@ -100,11 +100,11 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val hasCache = Repo.vod.isNotEmpty() || Repo.live.isNotEmpty() || withContext(Dispatchers.IO) { try { Repo.loadCache() } catch (e: Throwable) { false } }
             if (hasCache) {
-                withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {} }
+                withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {}; try { Discover.loadCached() } catch (e: Exception) {} }
                 showAccount(); show("home"); setLoading(null)
                 // atualiza por trás se o catálogo guardado tiver mais de 2 horas
                 if (Repo.cacheAge() > 2 * 3600 * 1000L) refreshInBackground()
-                else if (Trend.isStale()) refreshTrend()
+                else refreshTrend()
             } else {
                 setLoading("Conectando ao servidor…")
                 val err = withContext(Dispatchers.IO) { Repo.login() }
@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
                     withContext(Dispatchers.IO) { Repo.fetchAll { m -> runOnUiThread { setLoading(m) } } }
                 } catch (e: Throwable) { goLogin(if (e is OutOfMemoryError) "A lista é grande demais para a memória deste aparelho." else (e.message ?: "Não consegui baixar a lista.")); return@launch }
                 setLoading("Buscando o que está em alta…")
-                withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {} }
+                withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {}; try { Discover.loadCached() } catch (e: Exception) {} }
                 showAccount(); show("home"); setLoading(null)
             }
         }
@@ -130,9 +130,14 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshTrend() {
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) { try { Trend.ensure(Trend.isStale()) } catch (e: Exception) {} }
-            // só redesenha se a pessoa estiver no topo do Início (para não pular o foco)
-            if (tab == "home") {
+            val before = Discover.colls.size.toString() + "|" + Discover.because?.first?.key + "|" + Trend.updated
+            withContext(Dispatchers.IO) {
+                try { Trend.ensure(Trend.isStale()) } catch (e: Exception) {}
+                try { Discover.refresh() } catch (e: Exception) {}
+            }
+            val after = Discover.colls.size.toString() + "|" + Discover.because?.first?.key + "|" + Trend.updated
+            // só redesenha se algo mudou e a pessoa estiver no topo do Início (para não pular o foco)
+            if (tab == "home" && before != after) {
                 val f = currentFocus
                 if (f == null || f.parent === tabs || isInHero(f)) render(keepFocus = true)
             }
@@ -326,6 +331,9 @@ class MainActivity : ComponentActivity() {
                 e.add(HomeEntry.Row("Top 10 $label na", r.items.take(10).mapIndexed { i, it -> card(it, rank = i + 1) }, r.plat.n, r.plat.color, upd, ranked = true))
             }
         }
+        // Descobrir: porque você assistiu + coleções
+        Discover.because?.let { (src, l) -> e.add(HomeEntry.Row("Porque você assistiu " + src.name, l.map { card(it) })) }
+        Discover.colls.forEach { c -> e.add(HomeEntry.Row(c.title, c.items.map { card(it) })) }
         if (Trend.rows.isEmpty() && Trend.error != null) e.add(HomeEntry.Note("Top 10 das plataformas: não consegui falar com o TMDB (${Trend.error}). Tento de novo mais tarde."))
         if (Repo.live.isNotEmpty()) e.add(HomeEntry.Row("Canais ao vivo", Repo.live.take(24).map { card(it) }, live = true))
         if (movies.isNotEmpty()) e.add(HomeEntry.Row("Filmes adicionados recentemente", movies.take(30).map { card(it) }))
@@ -410,6 +418,11 @@ class MainActivity : ComponentActivity() {
                 .putExtra("title", it.name).putExtra("key", it.key).putExtra("icon", it.icon).putExtra("name", it.name))
         })
         btns.addView(button("ⓘ  Mais informações") { open(list[idx].first) }, llp(WRAP, WRAP).apply { marginStart = dp(12) })
+        btns.addView(button("Sortear filme") {
+            val pick = Discover.randomPick()
+            if (pick == null) Toast.makeText(this, "Nenhum filme para sortear", Toast.LENGTH_SHORT).show()
+            else { Toast.makeText(this, "Que tal: " + pick.name + "?", Toast.LENGTH_SHORT).show(); open(pick) }
+        }, llp(WRAP, WRAP).apply { marginStart = dp(12) })
         btns.addView(dots, llp(WRAP, WRAP).apply { marginStart = dp(18) })
         col.addView(btns, llp(WRAP, WRAP).apply { topMargin = dp(16) })
         f.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))

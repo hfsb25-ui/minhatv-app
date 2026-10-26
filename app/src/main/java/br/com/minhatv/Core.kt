@@ -575,7 +575,7 @@ object Trend {
     var error: String? = null
     private var builtFor = -1
 
-    private fun tm(path: String, params: Map<String, String>): JSONObject {
+    fun tm(path: String, params: Map<String, String>): JSONObject {
         val q = (params + ("api_key" to KEY)).entries.joinToString("&") { it.key + "=" + URLEncoder.encode(it.value, "UTF-8") }
         val req = Request.Builder().url("https://api.themoviedb.org/3/$path?$q").header("Accept", "application/json").build()
         http.newCall(req).execute().use { r ->
@@ -656,7 +656,7 @@ object Trend {
         return raw == null || raw.optInt("v") < 2 || System.currentTimeMillis() - raw.optLong("t") > MAX_AGE
     }
 
-    private class Idx(list: List<Item>) {
+    class Idx(list: List<Item>) {
         val byId = HashMap<String, Item>()
         val byName = HashMap<String, MutableList<Item>>()
 
@@ -669,7 +669,7 @@ object Trend {
         }
     }
 
-    private fun find(idx: Idx, id: String, t: String, ot: String, y: Int): Item? {
+    fun find(idx: Idx, id: String, t: String, ot: String, y: Int): Item? {
         idx.byId[id]?.let { return it }
         val nt = norm(t)
         val no = norm(ot)

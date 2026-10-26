@@ -36,6 +36,12 @@ class DetailActivity : ComponentActivity() {
     private var seasonBar: LinearLayout? = null
     private var epList: LinearLayout? = null
     private var lastFocusKey: String? = null
+    private var trailerKey: String? = null
+    private var cert = ""
+    private var exGenre = ""
+    private var exRuntime = ""
+    private lateinit var castBox: LinearLayout
+    private lateinit var similarBox: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +51,7 @@ class DetailActivity : ComponentActivity() {
         item = it
         build()
         if (item.kind == Kind.MOVIE) loadMovie() else loadSeries()
+        loadExtras()
     }
 
     override fun onResume() {
@@ -78,6 +85,10 @@ class DetailActivity : ComponentActivity() {
         body.addView(resumeBox, llp(dp(300), WRAP).apply { topMargin = dp(12) })
         btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; clipChildren = false; clipToPadding = false; setPadding(dp(4), dp(6), dp(4), dp(6)) }
         body.addView(btns, llp(WRAP, WRAP).apply { topMargin = dp(10) })
+        castBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(castBox, llp(MATCH, WRAP))
+        similarBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(similarBox, llp(MATCH, WRAP))
         scroll.addView(body)
         root.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
@@ -88,8 +99,9 @@ class DetailActivity : ComponentActivity() {
         val m = ArrayList<String>()
         if (item.rating > 0) m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", item.rating))
         if (item.year > 0) m.add(item.year.toString())
-        if (genre.isNotEmpty()) m.add(genre)
-        if (duration.isNotEmpty()) m.add(duration)
+        if (cert.isNotEmpty()) m.add(if (cert.equals("L", true)) "Livre" else "$cert anos")
+        genre.ifEmpty { exGenre }.takeIf { it.isNotEmpty() }?.let { m.add(it) }
+        duration.ifEmpty { exRuntime }.takeIf { it.isNotEmpty() }?.let { m.add(it) }
         if (item.kind == Kind.MOVIE && Lib.isSeen(item.key)) m.add("✓ Assistido")
         metaTv.text = m.joinToString("   ")
     }
@@ -146,6 +158,7 @@ class DetailActivity : ComponentActivity() {
         paintSeen()
         seen.setOnClickListener { val on = !Lib.isSeen(item.key); Lib.setSeen(item.key, on); paintSeen(); setMeta(item.genre, ""); movieButtons(); toast(if (on) "Marcado como assistido" else "Desmarcado") }
         addBtn(seen)
+        trailerKey?.let { k -> addBtn(button("▶  Trailer") { openTrailer(k) }) }
         first.post { first.requestFocus() }
     }
 
@@ -175,11 +188,11 @@ class DetailActivity : ComponentActivity() {
         if (item.cast.isNotEmpty()) credTv.text = "Elenco: " + item.cast
         if (item.plot.isEmpty()) plotTv.text = ""
         val loadingTv = text("Carregando episódios…", 13f, C.tx3)
-        body.addView(loadingTv, llp(WRAP, WRAP).apply { topMargin = dp(16) })
+        addBody(loadingTv, llp(WRAP, WRAP).apply { topMargin = dp(16) })
         lifecycleScope.launch {
             val r = withContext(Dispatchers.IO) { try { Repo.seriesInfo(item.id) } catch (e: Exception) { null } }
             body.removeView(loadingTv)
-            if (r == null || r.second.isEmpty()) { body.addView(text("Não consegui carregar os episódios.", 13f, C.tx3), llp(WRAP, WRAP).apply { topMargin = dp(16) }); return@launch }
+            if (r == null || r.second.isEmpty()) { addBody(text("Não consegui carregar os episódios.", 13f, C.tx3), llp(WRAP, WRAP).apply { topMargin = dp(16) }); return@launch }
             val (info, eps) = r
             episodes = eps
             seasons = eps.map { it.season }.distinct()
@@ -190,9 +203,9 @@ class DetailActivity : ComponentActivity() {
             val sv = HorizontalScrollView(this@DetailActivity).apply { isHorizontalScrollBarEnabled = false; clipChildren = false; clipToPadding = false }
             seasonBar = LinearLayout(this@DetailActivity).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(4), dp(6), dp(4), dp(6)) }
             sv.addView(seasonBar)
-            body.addView(sv, llp(MATCH, WRAP).apply { topMargin = dp(16) })
+            addBody(sv, llp(MATCH, WRAP).apply { topMargin = dp(16) })
             epList = LinearLayout(this@DetailActivity).apply { orientation = LinearLayout.VERTICAL }
-            body.addView(epList, llp(dp(640), WRAP).apply { topMargin = dp(6) })
+            addBody(epList, llp(dp(640), WRAP).apply { topMargin = dp(6) })
             seasons.forEach { sn ->
                 val b = chip("Temporada $sn") { showSeason(sn, true) }
                 b.tag = sn
@@ -254,6 +267,7 @@ class DetailActivity : ComponentActivity() {
             btns.getChildAt(2)?.requestFocus()
         }
         addBtn(all)
+        trailerKey?.let { k -> addBtn(button("▶  Trailer") { openTrailer(k) }) }
         if (hadFocus) play.requestFocus()
     }
 
@@ -327,6 +341,80 @@ class DetailActivity : ComponentActivity() {
                 .putExtra("key", "e" + ep.id).putExtra("icon", item.icon).putExtra("name", item.name).putExtra("sub", "T${ep.season} E${ep.num}")
                 .putExtra("sid", item.id).putExtra("start", start)
         )
+    }
+
+    /** coloca na página antes do bloco "Parecidos" */
+    private fun addBody(v: View, lp: LinearLayout.LayoutParams) = body.addView(v, body.indexOfChild(similarBox), lp)
+    private fun addBody(v: View) = body.addView(v, body.indexOfChild(similarBox))
+
+    /* ---------- Descobrir: trailer, classificação, elenco e parecidos ---------- */
+    private fun loadExtras() {
+        lifecycleScope.launch {
+            val ex = withContext(Dispatchers.IO) { try { Discover.extra(item) } catch (e: Exception) { null } } ?: return@launch
+            cert = ex.cert; exGenre = ex.genres; exRuntime = ex.runtime
+            setMeta(item.genre, "")
+            val p = plotTv.text.toString()
+            if (ex.overview.isNotEmpty() && (p.isEmpty() || p.startsWith("Sem sinopse") || p.startsWith("Carregando"))) plotTv.text = ex.overview
+            if (ex.backdrop.isNotEmpty()) backdrop.load(ex.backdrop) { crossfade(300) }
+            if (ex.trailer != null) {
+                trailerKey = ex.trailer
+                val hadFocus = btns.findFocus() != null
+                if (item.kind == Kind.MOVIE) movieButtons() else if (episodes.isNotEmpty()) seriesButtons()
+                else addBtn(button("▶  Trailer") { openTrailer(ex.trailer) })
+                if (!hadFocus) btns.clearFocus()
+            }
+            if (ex.cast.isNotEmpty()) showCast(ex.cast)
+            if (ex.similar.isNotEmpty()) showSimilar(ex.similar)
+        }
+    }
+
+    private fun showCast(cast: List<Pair<String, String>>) {
+        castBox.removeAllViews()
+        castBox.addView(text("Elenco", 16f, Color.WHITE, true), llp(WRAP, WRAP).apply { topMargin = dp(20) })
+        val sv = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; clipChildren = false; clipToPadding = false }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, dp(4)) }
+        cast.forEach { (name, photo) ->
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                isFocusable = true
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                setOnFocusChangeListener { v, f -> v.background = if (f) rounded(0x26FFFFFF, dpf(10f), dp(2), C.ac) else null }
+            }
+            val img = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(C.bg3) }
+                clipToOutline = true; outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                if (photo.isNotEmpty()) load(photo) { crossfade(200) }
+            }
+            col.addView(img, llp(dp(68), dp(68)))
+            col.addView(text(name, 11f, C.tx2, false, 2).apply { gravity = Gravity.CENTER }, llp(dp(84), WRAP).apply { topMargin = dp(6) })
+            row.addView(col, llp(WRAP, WRAP).apply { marginEnd = dp(6) })
+        }
+        sv.addView(row)
+        castBox.addView(sv, llp(MATCH, WRAP))
+    }
+
+    private fun showSimilar(list: List<Item>) {
+        similarBox.removeAllViews()
+        similarBox.addView(text("Parecidos na sua lista", 16f, Color.WHITE, true), llp(WRAP, WRAP).apply { topMargin = dp(22) })
+        val rv = androidx.recyclerview.widget.RecyclerView(this).apply {
+            layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@DetailActivity, androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL, false)
+            clipChildren = false; clipToPadding = false
+            setPadding(0, dp(4), 0, dp(4))
+            adapter = CardAdapter(list.take(20).map { x ->
+                Card(x, x.name, x.kind) { startActivity(Intent(this@DetailActivity, DetailActivity::class.java).putExtra("kind", x.kind.name).putExtra("id", x.id)) }
+            })
+        }
+        similarBox.addView(rv, llp(MATCH, WRAP).apply { marginStart = -dp(6) })
+    }
+
+    /** abre o trailer no app do YouTube da TV (ou no navegador) */
+    private fun openTrailer(key: String) {
+        val tries = listOf("vnd.youtube:$key", "https://www.youtube.com/watch?v=$key")
+        for (u in tries) {
+            try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return } catch (e: Exception) {}
+        }
+        toast("Instale o app do YouTube na TV para ver o trailer")
     }
 
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
