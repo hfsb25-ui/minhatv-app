@@ -32,6 +32,9 @@ object Discover {
     )
 
     var colls: List<Coll> = emptyList()
+    /** tendências do TMDB (filmes e séries juntos) que existem na lista */
+    var trendDay: List<Item> = emptyList()
+    var trendWeek: List<Item> = emptyList()
     var because: Pair<Item, List<Item>>? = null
     private var builtFor = -1
 
@@ -179,8 +182,59 @@ object Discover {
         return total == 0
     }
 
+    /* ---------- tendências de hoje e da semana (TMDB), buscadas 1 vez por dia ---------- */
+    private fun matchMixed(a: JSONArray?): List<Item> {
+        if (a == null) return emptyList()
+        val out = ArrayList<Item>(); val seen = HashSet<String>()
+        for (i in 0 until a.length()) {
+            val r = a.optJSONObject(i) ?: continue
+            val kind = when (r.s("media_type")) { "movie" -> Kind.MOVIE; "tv" -> Kind.SERIES; else -> continue }
+            val t = r.s("title").ifEmpty { r.s("name") }
+            val ot = r.s("original_title").ifEmpty { r.s("original_name") }
+            val y = (r.s("release_date").ifEmpty { r.s("first_air_date") }).take(4).toIntOrNull() ?: 0
+            val it = Trend.find(idx(kind), r.s("id"), t, ot, y) ?: continue
+            if (seen.add(it.key)) { out.add(it); Art.put(it, r.s("backdrop_path")) }
+        }
+        return out
+    }
+
+    private fun loadTrendingCached() {
+        val raw = try { Store.str("tmtrend")?.let { JSONObject(it) } } catch (e: Exception) { null } ?: return
+        trendDay = matchMixed(raw.optJSONArray("day")).take(30)
+        trendWeek = matchMixed(raw.optJSONArray("week")).take(30)
+    }
+
+    private fun refreshTrending() {
+        val old = try { Store.str("tmtrend")?.let { JSONObject(it) } } catch (e: Exception) { null }
+        if (old != null && System.currentTimeMillis() - old.optLong("t") < COLL_MAX_AGE) return
+        val out = JSONObject().put("t", System.currentTimeMillis())
+        var total = 0
+        listOf("day", "week").forEach { w ->
+            val items = JSONArray()
+            for (page in 1..5) {
+                try {
+                    val r = Trend.tm("trending/all/$w", mapOf("language" to "pt-BR", "page" to page.toString()))
+                    val res = r.optJSONArray("results") ?: continue
+                    for (i in 0 until res.length()) {
+                        val x = res.optJSONObject(i) ?: continue
+                        items.put(JSONObject().put("id", x.s("id")).put("media_type", x.s("media_type"))
+                            .put("title", x.s("title")).put("name", x.s("name"))
+                            .put("original_title", x.s("original_title")).put("original_name", x.s("original_name"))
+                            .put("release_date", x.s("release_date")).put("first_air_date", x.s("first_air_date"))
+                            .put("backdrop_path", x.s("backdrop_path")))
+                    }
+                } catch (e: Exception) {}
+            }
+            total += items.length()
+            out.put(w, items)
+        }
+        // só guarda se veio algo (se falhar, tenta de novo na próxima abertura)
+        if (total > 0) Store.put("tmtrend", out.toString())
+    }
+
     /** monta a partir do que está guardado (rápido) */
     fun loadCached() {
+        loadTrendingCached()
         val raw = try { Store.str("disc")?.let { JSONObject(it) } } catch (e: Exception) { null } ?: return
         if (builtFor == Repo.version + raw.optLong("t").toInt()) return
         val out = ArrayList<Coll>()
@@ -224,6 +278,8 @@ object Discover {
             builtFor = -1
         }
         refreshBecause()
+        try { refreshTrending() } catch (e: Exception) {}
+        builtFor = -1
         loadCached()
     }
 

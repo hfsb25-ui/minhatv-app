@@ -142,12 +142,12 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshTrend() {
         lifecycleScope.launch {
-            val before = Discover.colls.size.toString() + "|" + Discover.because?.first?.key + "|" + Trend.updated
+            val before = Discover.colls.size.toString() + "|" + Discover.because?.first?.key + "|" + Trend.updated + "|" + Discover.trendDay.size + "|" + Discover.trendWeek.size
             withContext(Dispatchers.IO) {
                 try { Trend.ensure(Trend.isStale()) } catch (e: Exception) {}
                 try { Discover.refresh() } catch (e: Exception) {}
             }
-            val after = Discover.colls.size.toString() + "|" + Discover.because?.first?.key + "|" + Trend.updated
+            val after = Discover.colls.size.toString() + "|" + Discover.because?.first?.key + "|" + Trend.updated + "|" + Discover.trendDay.size + "|" + Discover.trendWeek.size
             // só redesenha se algo mudou e a pessoa estiver no topo do Início (para não pular o foco)
             if (tab == "home" && before != after) {
                 val f = currentFocus
@@ -382,6 +382,9 @@ class MainActivity : ComponentActivity() {
         val upd = if (Trend.updated > 0) "no seu catálogo · atualizado às " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(Trend.updated)) else "no seu catálogo"
         // "Porque você assistiu" logo no começo
         Discover.because?.let { (src, l) -> e.add(HomeEntry.Row("Porque você assistiu " + src.name, l.map { card(it) })) }
+        // tendências do TMDB que existem na sua lista
+        if (Discover.trendDay.size >= 3) e.add(HomeEntry.Row("Tendências de hoje", Discover.trendDay.map { card(it) }, extra = "no seu catálogo"))
+        if (Discover.trendWeek.size >= 3) e.add(HomeEntry.Row("Tendências da semana", Discover.trendWeek.map { card(it) }, extra = "no seu catálogo"))
         // Top 10 e coleções intercalados (as coleções não ficam escondidas lá embaixo)
         val top10 = ArrayList<HomeEntry>()
         listOf(Kind.MOVIE to "filmes", Kind.SERIES to "séries").forEach { (k, label) ->
@@ -567,6 +570,8 @@ class MainActivity : ComponentActivity() {
         if (kind != Kind.LIVE) {
             entries.add(Entry("new", "Adicionados recentemente", { Repo.recent(list).take(200) }, minOf(200, list.size)))
             Trend.forKind(kind).forEach { r -> entries.add(Entry("pf:" + r.plat.k, "Em alta · " + r.plat.n, { r.items }, r.items.size)) }
+            Discover.trendDay.filter { it.kind == kind }.takeIf { it.isNotEmpty() }?.let { l -> entries.add(Entry("td", "Tendências de hoje", { l }, l.size)) }
+            Discover.trendWeek.filter { it.kind == kind }.takeIf { it.isNotEmpty() }?.let { l -> entries.add(Entry("tw", "Tendências da semana", { l }, l.size)) }
             Discover.colls.filter { it.kind == kind }.forEach { c -> entries.add(Entry("col:" + c.title, "Coleção · " + c.title, { c.items }, c.items.size)) }
         }
         Repo.catsOf(kind).forEach { c -> counts[c.id]?.let { n -> entries.add(Entry(c.id, c.name, { list.filter { it.cat == c.id } }, n)) } }
