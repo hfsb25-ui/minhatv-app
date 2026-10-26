@@ -29,7 +29,7 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           set -o pipefail
           if ! gradle assembleRelease --no-daemon --console=plain 2>&1 | tee build.log; then
-            grep -E "^e: |error:|What went wrong|Could not|> " build.log | head -60 | while IFS= read -r l; do echo "::error::$l"; done
+            grep -E "^e: |^w: .*error|What went wrong" -A3 build.log | grep -vE "^> Task" | head -40 | while IFS= read -r l; do echo "::error::$l"; done
             exit 1
           fi
 
