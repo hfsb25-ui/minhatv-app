@@ -409,13 +409,9 @@ class DetailActivity : ComponentActivity() {
         similarBox.addView(rv, llp(MATCH, WRAP).apply { marginStart = -dp(6) })
     }
 
-    /** abre o trailer no app do YouTube da TV (ou no navegador) */
+    /** toca o trailer dentro do app */
     private fun openTrailer(key: String) {
-        val tries = listOf("vnd.youtube:$key", "https://www.youtube.com/watch?v=$key")
-        for (u in tries) {
-            try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return } catch (e: Exception) {}
-        }
-        toast("Instale o app do YouTube na TV para ver o trailer")
+        startActivity(Intent(this, TrailerActivity::class.java).putExtra("key", key))
     }
 
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()

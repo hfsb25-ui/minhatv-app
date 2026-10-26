@@ -43,6 +43,13 @@
             android:screenOrientation="landscape" />
 
         <activity
+            android:name=".TrailerActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:hardwareAccelerated="true"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode" />
+
+        <activity
             android:name=".PlayerActivity"
             android:exported="false"
             android:screenOrientation="landscape"
