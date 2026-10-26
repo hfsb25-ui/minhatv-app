@@ -460,6 +460,9 @@ class MainActivity : ComponentActivity() {
         col.addView(tag)
         val title = text("", 36f, Color.WHITE, true, 2).apply { setLineSpacing(0f, 0.95f) }
         col.addView(title, llp(dp(520), WRAP).apply { topMargin = dp(8) })
+        // logo oficial do título (TMDB), no lugar do nome escrito quando existe
+        val logo = ImageView(this).apply { adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START; visibility = View.GONE }
+        col.addView(logo, llp(dp(400), dp(96)).apply { topMargin = dp(8) })
         val meta = text("", 13f, 0xFFD4D6DC.toInt())
         col.addView(meta, llp(WRAP, WRAP).apply { topMargin = dp(10) })
         val plot = text("", 13f, 0xFFC3C6CE.toInt(), false, 3).apply { setLineSpacing(0f, 1.25f) }
@@ -488,14 +491,35 @@ class MainActivity : ComponentActivity() {
             val (it, label) = list[i]
             tag.text = "FILME · $label"
             title.text = it.name
+            fun showLogo(url: String) {
+                if (url.isEmpty()) { logo.visibility = View.GONE; title.visibility = View.VISIBLE; return }
+                logo.load(url) {
+                    crossfade(250)
+                    listener(onSuccess = { _, _ -> if (idx == i) { logo.visibility = View.VISIBLE; title.visibility = View.GONE } },
+                        onError = { _, _ -> logo.visibility = View.GONE; title.visibility = View.VISIBLE })
+                }
+            }
+            val cached = Discover.artCached(it)
+            showLogo(cached?.logo ?: "")
             val m = ArrayList<String>()
             scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
             if (it.year > 0) m.add(it.year.toString())
             Repo.catName(Kind.MOVIE, it.cat).takeIf { c -> c.isNotEmpty() }?.let { c -> m.add(c) }
             meta.text = m.joinToString("   ")
             plot.text = it.plot
-            if (it.icon.isNotEmpty()) { bd.load(it.icon) { crossfade(400) }; poster.load(it.icon) { crossfade(400) }; poster.visibility = View.VISIBLE }
-            else { bd.setImageDrawable(null); poster.visibility = View.GONE }
+            // fundo: imagem larga oficial quando tem, senão a capa
+            val wideBd = Art.backdrop(it).ifEmpty { cached?.backdrop ?: "" }
+            bd.alpha = if (wideBd.isNotEmpty()) 0.6f else 0.45f
+            val bdUrl = wideBd.ifEmpty { it.icon }
+            if (bdUrl.isNotEmpty()) bd.load(bdUrl) { crossfade(400) } else bd.setImageDrawable(null)
+            if (it.icon.isNotEmpty()) { poster.load(it.icon) { crossfade(400) }; poster.visibility = View.VISIBLE } else poster.visibility = View.GONE
+            if (cached == null) lifecycleScope.launch {
+                val a = withContext(Dispatchers.IO) { try { Discover.art(it) } catch (e: Exception) { null } }
+                if (a != null && idx == i) {
+                    showLogo(a.logo)
+                    if (wideBd.isEmpty() && a.backdrop.isNotEmpty()) { bd.alpha = 0.6f; bd.load(a.backdrop) { crossfade(400) } }
+                }
+            }
             dots.text = if (list.size > 1) list.indices.joinToString(" ") { d -> if (d == i) "●" else "○" } else ""
             if (it.plot.isEmpty()) lifecycleScope.launch {
                 val p = withContext(Dispatchers.IO) { try { Repo.vodInfo(it.id).s("plot") } catch (e: Exception) { "" } }
@@ -503,6 +527,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         showHero(0)
+        lifecycleScope.launch(Dispatchers.IO) { list.forEach { (x, _) -> try { if (Discover.artCached(x) == null) Discover.art(x) } catch (e: Exception) {} } }
         // troca o destaque sozinho a cada 12 segundos
         heroTimer?.let { f.removeCallbacks(it) }
         if (list.size > 1) {

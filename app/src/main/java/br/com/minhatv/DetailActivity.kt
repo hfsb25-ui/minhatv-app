@@ -74,7 +74,21 @@ class DetailActivity : ComponentActivity() {
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(48), dp(28), dp(48), dp(40)) }
         val tag = (if (item.kind == Kind.MOVIE) "FILME" else "SÉRIE") + Repo.catName(item.kind, item.cat).let { if (it.isNotEmpty()) " · " + it.uppercase() else "" }
         body.addView(text(tag, 11f, C.ac, true).apply { letterSpacing = 0.1f })
-        body.addView(text(item.name, 34f, Color.WHITE, true, 3), llp(dp(560), WRAP).apply { topMargin = dp(8) })
+        val titleTv = text(item.name, 34f, Color.WHITE, true, 3)
+        body.addView(titleTv, llp(dp(560), WRAP).apply { topMargin = dp(8) })
+        // logo oficial do título (TMDB) no lugar do nome, quando existe
+        val logoIv = ImageView(this).apply { adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START; visibility = View.GONE }
+        body.addView(logoIv, llp(dp(420), dp(100)).apply { topMargin = dp(8) })
+        fun showLogo(url: String) {
+            if (url.isEmpty()) return
+            logoIv.load(url) { crossfade(250); listener(onSuccess = { _, _ -> logoIv.visibility = View.VISIBLE; titleTv.visibility = View.GONE }) }
+        }
+        val cachedArt = Discover.artCached(item)
+        if (cachedArt != null) { showLogo(cachedArt.logo); if (cachedArt.backdrop.isNotEmpty()) backdrop.load(cachedArt.backdrop) }
+        else if (item.kind != Kind.LIVE) lifecycleScope.launch {
+            val a = withContext(Dispatchers.IO) { try { Discover.art(item) } catch (e: Exception) { null } }
+            if (a != null) { showLogo(a.logo); if (a.backdrop.isNotEmpty()) backdrop.load(a.backdrop) { crossfade(300) } }
+        }
         metaTv = text("", 13f, 0xFFD4D6DC.toInt())
         body.addView(metaTv, llp(WRAP, WRAP).apply { topMargin = dp(10) })
         plotTv = text(item.plot.ifEmpty { "Carregando informações…" }, 14f, 0xFFC3C6CE.toInt(), false, 5).apply { setLineSpacing(0f, 1.3f) }
