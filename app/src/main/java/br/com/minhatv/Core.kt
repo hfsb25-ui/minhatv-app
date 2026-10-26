@@ -581,6 +581,8 @@ object Trend {
     var rows: List<Row> = emptyList()
     /** nota do TMDB (0 a 10) dos títulos em alta encontrados na lista, pela chave do item */
     var votes: Map<String, Double> = emptyMap()
+    /** títulos que estão no Top 10 de alguma plataforma (para o selo "TOP 10") */
+    var topKeys: Set<String> = emptySet()
     var updated = 0L
     var error: String? = null
     private var builtFor = -1
@@ -719,6 +721,7 @@ object Trend {
         }
         rows = res
         votes = vt
+        topKeys = res.flatMap { r -> r.items.take(10).map { it.key } }.toHashSet()
     }
 
     fun forKind(kind: Kind) = rows.filter { it.kind == kind }

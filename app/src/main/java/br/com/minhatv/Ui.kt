@@ -131,7 +131,8 @@ class Card(
 
 class CardVH(
     val root: LinearLayout, val box: FrameLayout, val img: ImageView, val fb: TextView,
-    val title: TextView, val sub: TextView, val bar: View, val barBg: View, val badge: TextView, val num: TextView, val rankTv: TextView?
+    val title: TextView, val sub: TextView, val bar: View, val barBg: View, val badge: TextView, val num: TextView, val rankTv: TextView?,
+    val top: TextView
 ) : RecyclerView.ViewHolder(root)
 
 class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, private val fill: Boolean = false) : RecyclerView.Adapter<CardVH>() {
@@ -189,6 +190,19 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
         box.addView(bar, FrameLayout.LayoutParams(0, c.dp(4), Gravity.BOTTOM))
         box.addView(badge, FrameLayout.LayoutParams(c.dp(24), c.dp(24), Gravity.TOP or Gravity.END).apply { setMargins(0, c.dp(6), c.dp(6), 0) })
         box.addView(num, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.START).apply { setMargins(c.dp(6), c.dp(6), 0, 0) })
+        // selo "TOP 10" (vermelho, no canto, como na Netflix)
+        val top = c.text("TOP\n10", 8f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 0.85f)
+            letterSpacing = 0.04f
+            setPadding(c.dp(4), c.dp(3), c.dp(4), c.dp(3))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFE50914.toInt())
+                cornerRadii = floatArrayOf(0f, 0f, c.dpf(8f), c.dpf(8f), 0f, 0f, c.dpf(4f), c.dpf(4f))
+            }
+            visibility = View.GONE
+        }
+        box.addView(top, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END))
         val title = c.text("", 12f, 0xFFE3E4E8.toInt(), true, 1)
         val sub = c.text("", 11f, C.tx3, false, 1)
         col.addView(box, llp(if (fill) MATCH else w, WRAP))
@@ -205,7 +219,7 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
             v.translationZ = if (f) 10f else 0f
             if (f) (v.tag as? Card)?.onFocus?.invoke()
         }
-        return CardVH(outer, box, img, fb, title, sub, bar, barBg, badge, num, rankTv)
+        return CardVH(outer, box, img, fb, title, sub, bar, barBg, badge, num, rankTv, top)
     }
 
     override fun onBindViewHolder(h: CardVH, position: Int) {
@@ -222,6 +236,8 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
         h.rankTv?.text = if (card.rank > 0) card.rank.toString() else ""
         h.num.text = card.item?.num ?: ""
         h.num.visibility = if (card.kind == Kind.LIVE && !card.item?.num.isNullOrEmpty()) View.VISIBLE else View.GONE
+        // selo TOP 10: em qualquer fileira, menos nas próprias fileiras de Top 10 (lá já tem o número grande)
+        val inTop = !ranked && card.item != null && card.item.kind != Kind.LIVE && card.item.key in Trend.topKeys
         // progresso / assistido / favorito
         var pct = card.progress
         var badge = ""
@@ -233,6 +249,8 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
         h.badge.text = badge
         h.badge.setTextColor(if (badge == "★") C.ac else C.ok)
         h.badge.visibility = if (badge.isEmpty()) View.GONE else View.VISIBLE
+        h.top.visibility = if (inTop) View.VISIBLE else View.GONE
+        (h.badge.layoutParams as? FrameLayout.LayoutParams)?.let { lp -> lp.topMargin = h.root.context.dp(if (inTop) 36 else 6); h.badge.layoutParams = lp }
         if (pct > 0) {
             h.bar.visibility = View.VISIBLE; h.barBg.visibility = View.VISIBLE
             h.box.post { h.bar.layoutParams = h.bar.layoutParams.apply { width = h.box.width * pct / 100 }; h.bar.requestLayout() }

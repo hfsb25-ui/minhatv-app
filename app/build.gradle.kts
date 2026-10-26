@@ -14,8 +14,8 @@ android {
         applicationId = "br.com.minhatv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 17
-        versionName = "2.4"
+        versionCode = 18
+        versionName = "2.5"
 
         // lista embutida (lista.properties na raiz do projeto), embaralhada para não ficar em texto aberto no APK
         val lista = Properties().apply { rootProject.file("lista.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) } }
