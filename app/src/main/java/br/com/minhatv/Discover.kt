@@ -171,7 +171,12 @@ object Discover {
     /* ---------- coleções e "porque você assistiu" ---------- */
     fun isStale(): Boolean {
         val raw = try { Store.str("disc")?.let { JSONObject(it) } } catch (e: Exception) { null }
-        return raw == null || System.currentTimeMillis() - raw.optLong("t") > COLL_MAX_AGE
+        if (raw == null || System.currentTimeMillis() - raw.optLong("t") > COLL_MAX_AGE) return true
+        // guardado vazio (busca anterior falhou): tenta de novo
+        val a = raw.optJSONArray("colls") ?: return true
+        var total = 0
+        for (i in 0 until a.length()) total += a.optJSONObject(i)?.optJSONArray("items")?.length() ?: 0
+        return total == 0
     }
 
     /** monta a partir do que está guardado (rápido) */
@@ -184,7 +189,7 @@ object Discover {
             val c = a.optJSONObject(i) ?: continue
             val kind = if (c.s("kind") == "tv") Kind.SERIES else Kind.MOVIE
             val items = matchList(kind, c.optJSONArray("items"))
-            if (items.size >= 4) out.add(Coll(c.s("title"), kind, items.take(20)))
+            if (items.size >= 3) out.add(Coll(c.s("title"), kind, items.take(30)))
         }
         colls = out
         builtFor = Repo.version + raw.optLong("t").toInt()
@@ -212,7 +217,10 @@ object Discover {
                 }
                 arr.put(JSONObject().put("title", d.title).put("kind", d.kind).put("items", items))
             }
-            Store.put("disc", JSONObject().put("t", System.currentTimeMillis()).put("colls", arr).toString())
+            // só marca como atualizado se veio algo (se falhar, tenta de novo na próxima abertura)
+            var total = 0
+            for (i in 0 until arr.length()) total += arr.optJSONObject(i)?.optJSONArray("items")?.length() ?: 0
+            if (total > 0) Store.put("disc", JSONObject().put("t", System.currentTimeMillis()).put("colls", arr).toString())
             builtFor = -1
         }
         refreshBecause()

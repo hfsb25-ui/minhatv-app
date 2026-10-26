@@ -126,6 +126,7 @@ class MainActivity : ComponentActivity() {
                 setLoading("Buscando o que está em alta…")
                 withContext(Dispatchers.IO) { try { Trend.ensure(false) } catch (e: Exception) {}; try { Discover.loadCached() } catch (e: Exception) {} }
                 showAccount(); show(tab); setLoading(null)
+                refreshTrend()
             }
         }
     }
@@ -379,14 +380,23 @@ class MainActivity : ComponentActivity() {
         val fch = favs.filter { it.kind == Kind.LIVE }
         if (fch.isNotEmpty()) e.add(HomeEntry.Row("Canais favoritos", fch.map { card(it, fch) }))
         val upd = if (Trend.updated > 0) "no seu catálogo · atualizado às " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(Trend.updated)) else "no seu catálogo"
+        // "Porque você assistiu" logo no começo
+        Discover.because?.let { (src, l) -> e.add(HomeEntry.Row("Porque você assistiu " + src.name, l.map { card(it) })) }
+        // Top 10 e coleções intercalados (as coleções não ficam escondidas lá embaixo)
+        val top10 = ArrayList<HomeEntry>()
         listOf(Kind.MOVIE to "filmes", Kind.SERIES to "séries").forEach { (k, label) ->
             Trend.forKind(k).forEach { r ->
-                e.add(HomeEntry.Row("Top 10 $label na", r.items.take(10).mapIndexed { i, it -> card(it, rank = i + 1) }, r.plat.n, r.plat.color, upd, ranked = true))
+                top10.add(HomeEntry.Row("Top 10 $label na", r.items.take(10).mapIndexed { i, it -> card(it, rank = i + 1) }, r.plat.n, r.plat.color, upd, ranked = true))
             }
         }
-        // Descobrir: porque você assistiu + coleções
-        Discover.because?.let { (src, l) -> e.add(HomeEntry.Row("Porque você assistiu " + src.name, l.map { card(it) })) }
-        Discover.colls.forEach { c -> e.add(HomeEntry.Row(c.title, c.items.map { card(it) })) }
+        val colls = Discover.colls.map { c -> HomeEntry.Row(c.title, c.items.map { card(it) }) }
+        var ti = 0; var ci = 0
+        // 2 de Top 10, depois alterna 1 coleção e 1 Top 10
+        while (ti < top10.size && ti < 2) e.add(top10[ti++])
+        while (ti < top10.size || ci < colls.size) {
+            if (ci < colls.size) e.add(colls[ci++])
+            if (ti < top10.size) e.add(top10[ti++])
+        }
         if (Trend.rows.isEmpty() && Trend.error != null) e.add(HomeEntry.Note("Top 10 das plataformas: não consegui falar com o TMDB (${Trend.error}). Tento de novo mais tarde."))
         if (Repo.live.isNotEmpty()) e.add(HomeEntry.Row("Canais ao vivo", Repo.live.take(24).map { card(it) }, live = true))
         if (movies.isNotEmpty()) e.add(HomeEntry.Row("Filmes adicionados recentemente", movies.take(30).map { card(it) }))
@@ -394,7 +404,7 @@ class MainActivity : ComponentActivity() {
         if (sers.isNotEmpty()) e.add(HomeEntry.Row("Séries adicionadas recentemente", sers.take(30).map { card(it) }))
         Repo.vodCats.take(6).forEach { c -> val l = Repo.vod.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row(c.name, l.map { card(it) })) }
         Repo.serCats.take(3).forEach { c -> val l = Repo.series.filter { it.cat == c.id }.take(30); if (l.isNotEmpty()) e.add(HomeEntry.Row("Séries · " + c.name, l.map { card(it) })) }
-        e.add(HomeEntry.Note("Sua lista: ${Repo.live.size} canais · ${Repo.vod.size} filmes · ${Repo.series.size} séries"))
+        e.add(HomeEntry.Note("Sua lista: ${Repo.live.size} canais · ${Repo.vod.size} filmes · ${Repo.series.size} séries · ${Discover.colls.size} coleções"))
         lastSig = libSig()
         return RecyclerView(this).apply {
             homeRv = this
@@ -557,6 +567,7 @@ class MainActivity : ComponentActivity() {
         if (kind != Kind.LIVE) {
             entries.add(Entry("new", "Adicionados recentemente", { Repo.recent(list).take(200) }, minOf(200, list.size)))
             Trend.forKind(kind).forEach { r -> entries.add(Entry("pf:" + r.plat.k, "Em alta · " + r.plat.n, { r.items }, r.items.size)) }
+            Discover.colls.filter { it.kind == kind }.forEach { c -> entries.add(Entry("col:" + c.title, "Coleção · " + c.title, { c.items }, c.items.size)) }
         }
         Repo.catsOf(kind).forEach { c -> counts[c.id]?.let { n -> entries.add(Entry(c.id, c.name, { list.filter { it.cat == c.id } }, n)) } }
 
