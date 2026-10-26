@@ -171,7 +171,7 @@ object Discover {
     /* ---------- coleções e "porque você assistiu" ---------- */
     fun isStale(): Boolean {
         val raw = try { Store.str("disc")?.let { JSONObject(it) } } catch (e: Exception) { null }
-        if (raw == null || System.currentTimeMillis() - raw.optLong("t") > COLL_MAX_AGE) return true
+        if (raw == null || raw.optInt("v") < 2 || System.currentTimeMillis() - raw.optLong("t") > COLL_MAX_AGE) return true
         // guardado vazio (busca anterior falhou): tenta de novo
         val a = raw.optJSONArray("colls") ?: return true
         var total = 0
@@ -220,7 +220,7 @@ object Discover {
             // só marca como atualizado se veio algo (se falhar, tenta de novo na próxima abertura)
             var total = 0
             for (i in 0 until arr.length()) total += arr.optJSONObject(i)?.optJSONArray("items")?.length() ?: 0
-            if (total > 0) Store.put("disc", JSONObject().put("t", System.currentTimeMillis()).put("colls", arr).toString())
+            if (total > 0) Store.put("disc", JSONObject().put("v", 2).put("t", System.currentTimeMillis()).put("colls", arr).toString())
             builtFor = -1
         }
         refreshBecause()
