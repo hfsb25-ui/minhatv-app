@@ -204,8 +204,9 @@ class DetailActivity : ComponentActivity() {
             seasonBar = LinearLayout(this@DetailActivity).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(4), dp(6), dp(4), dp(6)) }
             sv.addView(seasonBar)
             addBody(sv, llp(MATCH, WRAP).apply { topMargin = dp(16) })
-            epList = LinearLayout(this@DetailActivity).apply { orientation = LinearLayout.VERTICAL }
-            addBody(epList, llp(dp(640), WRAP).apply { topMargin = dp(6) })
+            val el = LinearLayout(this@DetailActivity).apply { orientation = LinearLayout.VERTICAL }
+            epList = el
+            addBody(el, llp(dp(640), WRAP).apply { topMargin = dp(6) })
             seasons.forEach { sn ->
                 val b = chip("Temporada $sn") { showSeason(sn, true) }
                 b.tag = sn
