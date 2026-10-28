@@ -126,6 +126,8 @@ class Card(
     val progress: Int = -1,
     val rank: Int = 0,
     val onFocus: (() -> Unit)? = null,
+    /** segurar OK (ex.: remover de "Continuar assistindo") */
+    val onLong: (() -> Unit)? = null,
     val onClick: () -> Unit
 )
 
@@ -226,6 +228,8 @@ class CardAdapter(var cards: List<Card>, private val ranked: Boolean = false, pr
         val card = cards[position]
         h.root.tag = card
         h.root.setOnClickListener { card.onClick() }
+        val lg = card.onLong
+        if (lg != null) h.root.setOnLongClickListener { lg(); true } else { h.root.setOnLongClickListener(null); h.root.isLongClickable = false }
         h.title.text = card.title
         h.sub.text = card.sub
         h.sub.visibility = if (card.sub.isEmpty()) View.GONE else View.VISIBLE

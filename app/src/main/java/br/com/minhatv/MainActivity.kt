@@ -190,6 +190,8 @@ class MainActivity : ComponentActivity() {
         content = FrameLayout(this)
         col.addView(content, llp(MATCH, 0, 1f))
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
+        root.addView(infoBar(), FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        root.viewTreeObserver.addOnGlobalFocusChangeListener { _, nv -> onAnyFocus(nv) }
         loading = splashView("Carregando…", !fastStart)
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(root)
@@ -263,6 +265,96 @@ class MainActivity : ComponentActivity() {
         acct.text = Repo.userName.ifEmpty { Xt.user } + exp
     }
 
+    /* ---------- informação rápida ao focar uma capa (filme/série) ---------- */
+    private lateinit var info: LinearLayout
+    private lateinit var infoTitle: TextView
+    private lateinit var infoMeta: TextView
+    private lateinit var infoPlot: TextView
+    private var infoItem: Item? = null
+    private val infoDur = HashMap<String, String>()
+    private var infoJob: Job? = null
+
+    private fun infoBar(): View {
+        info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(46), dp(26), dp(46), dp(16))
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xF20A0B0F.toInt(), 0xD90A0B0F.toInt(), 0x000A0B0F))
+            visibility = View.GONE
+            isFocusable = false
+        }
+        infoTitle = text("", 17f, Color.WHITE, true, 1)
+        infoMeta = text("", 12f, C.tx2, false, 1)
+        infoPlot = text("", 12.5f, 0xFFC9CBD2.toInt(), false, 2)
+        info.addView(infoTitle)
+        info.addView(infoMeta, llp(MATCH, WRAP).apply { topMargin = dp(3) })
+        info.addView(infoPlot, llp(MATCH, WRAP).apply { topMargin = dp(4); marginEnd = dp(260) })
+        return info
+    }
+
+    private fun onAnyFocus(v: View?) {
+        val it = (v?.tag as? Card)?.item
+        if (it == null || it.kind == Kind.LIVE) { info.visibility = View.GONE; infoItem = null; infoJob?.cancel(); return }
+        // a lista abre espaço embaixo para a capa focada não ficar atrás do painel
+        var p = v?.parent
+        while (p != null) {
+            if (p is RecyclerView && p.layoutManager?.canScrollVertically() == true) {
+                if (p.paddingBottom < dp(110)) { p.clipToPadding = false; p.setPadding(p.paddingLeft, p.paddingTop, p.paddingRight, dp(110)) }
+                break
+            }
+            p = p.parent
+        }
+        if (infoItem === it && info.visibility == View.VISIBLE) return
+        infoItem = it
+        fillInfo(it)
+        info.visibility = View.VISIBLE
+        infoJob?.cancel()
+        // detalhes que a lista não traz (duração, sinopse): só se ficar parado na capa
+        if (it.kind == Kind.MOVIE && (it.plot.isEmpty() || !infoDur.containsKey(it.key))) infoJob = lifecycleScope.launch {
+            delay(700)
+            val o = withContext(Dispatchers.IO) { try { Repo.vodInfo(it.id) } catch (e: Exception) { null } } ?: return@launch
+            infoDur[it.key] = o.s("duration").let { d -> fmtInfoDur(d, o.optInt("duration_secs")) }
+            if (it.plot.isEmpty()) it.plot = o.s("plot")
+            if (infoItem === it) fillInfo(it)
+        }
+    }
+
+    private fun fmtInfoDur(d: String, secs: Int): String {
+        var s = secs
+        if (s <= 0) { val p = d.split(":").mapNotNull { x -> x.trim().toIntOrNull() }; if (p.size == 3) s = p[0] * 3600 + p[1] * 60 + p[2] }
+        if (s <= 0) return ""
+        val h = s / 3600; val mi = (s % 3600) / 60
+        return if (h > 0) "${h}h ${"%02d".format(mi)}min" else "${mi}min"
+    }
+
+    private fun fillInfo(it: Item) {
+        infoTitle.text = it.name
+        val m = ArrayList<String>()
+        scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
+        if (it.year > 0) m.add(it.year.toString())
+        infoDur[it.key]?.takeIf { d -> d.isNotEmpty() }?.let { d -> m.add(d) }
+        if (it.kind == Kind.SERIES) m.add("Série")
+        val g = it.genre.split(",", "/").map { x -> x.trim() }.filter { x -> x.isNotEmpty() }.take(2).joinToString(", ")
+        (g.ifEmpty { Repo.catName(it.kind, it.cat) }).takeIf { x -> x.isNotEmpty() }?.let { x -> m.add(x) }
+        if (Lib.isSeen(it.key)) m.add("✓ Assistido") else Lib.prog(it.key)?.let { p -> m.add("Faltam " + fmtDur(p.dur - p.pos)) }
+        infoMeta.text = m.joinToString("   ·   ")
+        infoPlot.text = it.plot
+        infoPlot.visibility = if (it.plot.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /* ---------- tirar de "Continuar assistindo" (segurar OK) ---------- */
+    private fun askRemove(p: Prog) {
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Remover de Continuar assistindo?")
+            .setMessage(p.name + (if (p.sub.isNotEmpty()) " · " + p.sub else ""))
+            .setPositiveButton("Remover") { _, _ ->
+                Lib.dropProg(p.key)
+                Toast.makeText(this, "Removido de Continuar assistindo", Toast.LENGTH_SHORT).show()
+                refreshCurrent()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun confirmLogout() {
         if (System.currentTimeMillis() - lastBack < 3000) {
             Repo.logout()
@@ -281,7 +373,7 @@ class MainActivity : ComponentActivity() {
 
     /** resumo do que muda ao assistir/favoritar (para só redesenhar quando precisa) */
     private fun libSig(): String =
-        Lib.progs().take(6).joinToString(",") { it.key + ":" + it.pct } + "|" + Lib.favs().take(30).joinToString(",") + "|" + Lib.seenKeys('m').size
+        Lib.progs().size.toString() + "/" + Lib.progs().take(6).joinToString(",") { it.key + ":" + it.pct } + "|" + Lib.favs().take(30).joinToString(",") + "|" + Lib.seenKeys('m').size
 
     private fun refreshCurrent() {
         if (tab == "home" || tab == "mylist") {
@@ -371,8 +463,8 @@ class MainActivity : ComponentActivity() {
         val heroes = heroCandidates(movies)
         if (heroes.isNotEmpty()) e.add(HomeEntry.Hero(heroView(heroes)))
         val cont = Lib.progs().filter { it.dur > 0 && !Lib.isSeen(it.key) }.take(20)
-        if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", cont.map { p ->
-            Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct) { resume(p) }
+        if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", extra = "segure OK para remover", cards = cont.map { p ->
+            Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct, onLong = { askRemove(p) }) { resume(p) }
         }))
         val favs = Lib.favs().mapNotNull { Repo.findKey(it) }
         val myl = favs.filter { it.kind != Kind.LIVE }.take(30)
@@ -675,7 +767,7 @@ class MainActivity : ComponentActivity() {
         val e = ArrayList<HomeEntry>()
         val cont = Lib.progs().filter { it.dur > 0 }.take(30)
         if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", cont.map { p ->
-            Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct) { resume(p) }
+            Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct, onLong = { askRemove(p) }) { resume(p) }
         }))
         val favs = Lib.favs().mapNotNull { Repo.findKey(it) }
         favs.filter { it.kind == Kind.MOVIE }.takeIf { it.isNotEmpty() }?.let { l -> e.add(HomeEntry.Row("Filmes na minha lista", l.map { card(it) })) }
