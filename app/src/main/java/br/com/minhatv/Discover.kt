@@ -136,6 +136,45 @@ object Discover {
         return Extra(trailer, cert, cast, similar, o.s("overview"), bd, runtime, genres)
     }
 
+    /* ---------- dados curtos do título (classificação, duração/temporadas, gêneros) ---------- */
+    class MetaInfo(val cert: String, val len: String, val genres: List<String>)
+    private val metaCache: JSONObject by lazy { try { JSONObject(Store.str("tmdbmeta") ?: "{}") } catch (e: Exception) { JSONObject() } }
+
+    fun metaCached(it: Item): MetaInfo? = metaCache.optJSONObject(it.key)?.let { o -> MetaInfo(o.s("c"), o.s("r"), o.s("g").split("|").filter { g -> g.isNotEmpty() }) }
+
+    fun meta(it: Item): MetaInfo? {
+        metaCached(it)?.let { return it }
+        if (it.kind == Kind.LIVE) return null
+        val id = tmdbId(it) ?: run { saveMeta(it, "", "", ""); return metaCached(it) }
+        val movie = it.kind != Kind.SERIES
+        val o = try {
+            Trend.tm((if (movie) "movie/" else "tv/") + id, mapOf("language" to "pt-BR", "append_to_response" to if (movie) "release_dates" else "content_ratings"))
+        } catch (e: Exception) { return null }
+        var cert = ""
+        if (movie) o.optJSONObject("release_dates")?.optJSONArray("results")?.let { r ->
+            for (i in 0 until r.length()) {
+                val c = r.optJSONObject(i) ?: continue
+                if (c.s("iso_3166_1") != "BR") continue
+                val dd = c.optJSONArray("release_dates") ?: continue
+                for (j in 0 until dd.length()) { val ce = dd.optJSONObject(j)?.s("certification") ?: ""; if (ce.isNotEmpty()) { cert = ce; break } }
+            }
+        } else o.optJSONObject("content_ratings")?.optJSONArray("results")?.let { r ->
+            for (i in 0 until r.length()) { val c = r.optJSONObject(i) ?: continue; if (c.s("iso_3166_1") == "BR") cert = c.s("rating") }
+        }
+        val len = if (movie) o.optInt("runtime").let { m -> if (m > 0) (if (m >= 60) "${m / 60}h ${"%02d".format(m % 60)}min" else "${m}min") else "" }
+        else o.optInt("number_of_seasons").let { n -> if (n > 1) "$n temporadas" else o.optInt("number_of_episodes").let { e -> if (e > 0) "$e episódios" else if (n == 1) "1 temporada" else "" } }
+        val genres = o.optJSONArray("genres")?.let { g -> (0 until g.length()).mapNotNull { g.optJSONObject(it)?.s("name") }.take(3).joinToString("|") } ?: ""
+        Art.put(it, o.s("backdrop_path"))
+        saveMeta(it, cert, len, genres)
+        return metaCached(it)
+    }
+
+    private fun saveMeta(it: Item, c: String, r: String, g: String) {
+        metaCache.put(it.key, JSONObject().put("c", c).put("r", r).put("g", g))
+        if (metaCache.length() > 700) { val ks = metaCache.keys().asSequence().toList(); ks.take(ks.size - 600).forEach { k -> metaCache.remove(k) } }
+        Store.put("tmdbmeta", metaCache.toString())
+    }
+
     /* ---------- logo oficial e imagem larga de um título (para o topo da tela) ---------- */
     class ArtInfo(val logo: String, val backdrop: String)
     private val artCache: JSONObject by lazy { try { JSONObject(Store.str("tmdbart") ?: "{}") } catch (e: Exception) { JSONObject() } }

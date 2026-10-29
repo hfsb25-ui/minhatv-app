@@ -190,7 +190,7 @@ class MainActivity : ComponentActivity() {
         content = FrameLayout(this)
         col.addView(content, llp(MATCH, 0, 1f))
         root.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
-        root.addView(infoBar(), FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM))
+        rootF = root
         root.viewTreeObserver.addOnGlobalFocusChangeListener { _, nv -> onAnyFocus(nv) }
         loading = splashView("Carregando…", !fastStart)
         root.addView(loading, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -265,80 +265,152 @@ class MainActivity : ComponentActivity() {
         acct.text = Repo.userName.ifEmpty { Xt.user } + exp
     }
 
-    /* ---------- informação rápida ao focar uma capa (filme/série) ---------- */
-    private lateinit var info: LinearLayout
-    private lateinit var infoTitle: TextView
-    private lateinit var infoMeta: TextView
-    private lateinit var infoPlot: TextView
-    private var infoItem: Item? = null
-    private val infoDur = HashMap<String, String>()
-    private var infoJob: Job? = null
+    /* ---------- capa em destaque ao selecionar (como na Netflix) ---------- */
+    private lateinit var rootF: FrameLayout
+    private var pop: View? = null
+    private var popJob: Job? = null
+    private var browseHero: View? = null
+    private var browseHeroH = 0
+    private var browseHeroOpen = true
 
-    private fun infoBar(): View {
-        info = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(46), dp(26), dp(46), dp(16))
-            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xF20A0B0F.toInt(), 0xD90A0B0F.toInt(), 0x000A0B0F))
-            visibility = View.GONE
-            isFocusable = false
-        }
-        infoTitle = text("", 17f, Color.WHITE, true, 1)
-        infoMeta = text("", 12f, C.tx2, false, 1)
-        infoPlot = text("", 12.5f, 0xFFC9CBD2.toInt(), false, 2)
-        info.addView(infoTitle)
-        info.addView(infoMeta, llp(MATCH, WRAP).apply { topMargin = dp(3) })
-        info.addView(infoPlot, llp(MATCH, WRAP).apply { topMargin = dp(4); marginEnd = dp(260) })
-        return info
+    private fun isInside(v: View, tagName: String): Boolean {
+        var p: View? = v
+        while (p != null) { if (p.tag == tagName) return true; p = p.parent as? View }
+        return false
     }
 
     private fun onAnyFocus(v: View?) {
-        val it = (v?.tag as? Card)?.item
-        if (it == null || it.kind == Kind.LIVE) { info.visibility = View.GONE; infoItem = null; infoJob?.cancel(); return }
-        // a lista abre espaço embaixo para a capa focada não ficar atrás do painel
-        var p = v?.parent
-        while (p != null) {
-            if (p is RecyclerView && p.layoutManager?.canScrollVertically() == true) {
-                if (p.paddingBottom < dp(110)) { p.clipToPadding = false; p.setPadding(p.paddingLeft, p.paddingTop, p.paddingRight, dp(110)) }
-                break
+        // destaque do topo em Filmes/Séries: recolhe quando você entra na grade e volta quando sai dela
+        browseHero?.let { h -> if (v != null) setBrowseHero(h, !isInside(v, "grid")) }
+        hidePop()
+        val fv = v ?: return
+        val it = (fv.tag as? Card)?.item ?: return
+        if (it.kind == Kind.LIVE) return
+        popJob = lifecycleScope.launch {
+            delay(600)
+            if (currentFocus === fv && fv.isShown) showPop(fv, it)
+        }
+    }
+
+    private fun setBrowseHero(h: View, open: Boolean) {
+        if (open == browseHeroOpen || browseHeroH <= 0) return
+        browseHeroOpen = open
+        val from = h.layoutParams.height
+        val to = if (open) browseHeroH else 0
+        android.animation.ValueAnimator.ofInt(from, to).apply {
+            duration = 220
+            addUpdateListener { va -> h.layoutParams = h.layoutParams.apply { height = va.animatedValue as Int }; h.requestLayout() }
+            start()
+        }
+    }
+
+    private fun hidePop() {
+        popJob?.cancel()
+        pop?.let { p -> rootF.removeView(p) }
+        pop = null
+    }
+
+    /** cores da classificação indicativa do Brasil */
+    private fun certView(): TextView = text("", 11f, Color.WHITE, true).apply {
+        setPadding(dp(5), dp(1), dp(5), dp(1)); visibility = View.GONE
+    }
+
+    private fun setCert(tv: TextView, c: String) {
+        val k = c.trim().uppercase().removePrefix("A")
+        val (bg, fg) = when (k) {
+            "L", "LIVRE" -> 0xFF0C9447.toInt() to Color.WHITE
+            "10" -> 0xFF0F7DC2.toInt() to Color.WHITE
+            "12" -> 0xFFF8C411.toInt() to Color.BLACK
+            "14" -> 0xFFE67824.toInt() to Color.WHITE
+            "16" -> 0xFFDB2827.toInt() to Color.WHITE
+            "18" -> 0xFF1D1815.toInt() to Color.WHITE
+            else -> { tv.visibility = View.GONE; return }
+        }
+        tv.text = if (k == "LIVRE") "L" else k
+        tv.setTextColor(fg)
+        tv.background = rounded(bg, dpf(3f), if (k == "18") dp(1) else 0, 0x66FFFFFF)
+        tv.visibility = View.VISIBLE
+    }
+
+    private fun showPop(v: View, it: Item) {
+        val w = dp(300)
+        val imgH = w * 9 / 16
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(0xFF181A20.toInt(), dpf(10f))
+            clipToOutline = true
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            elevation = dpf(24f)
+            isFocusable = false
+            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        }
+        val top = FrameLayout(this)
+        val img = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setBackgroundColor(C.colorFor(it.name)) }
+        top.addView(img, FrameLayout.LayoutParams(MATCH, MATCH))
+        top.addView(View(this).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xE6181A20.toInt(), 0x00181A20)) }, FrameLayout.LayoutParams(MATCH, imgH / 2, Gravity.BOTTOM))
+        val logo = ImageView(this).apply { adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START; visibility = View.GONE }
+        top.addView(logo, FrameLayout.LayoutParams(dp(170), dp(54), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(12), 0, 0, dp(10)) })
+        val ttl = text(it.name, 16f, Color.WHITE, true, 2)
+        top.addView(ttl, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply { setMargins(dp(12), 0, dp(12), dp(10)) })
+        card.addView(top, llp(MATCH, imgH))
+        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(10), dp(14), dp(12)) }
+        val r1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val kindTv = text(if (it.kind == Kind.SERIES) "Série" else "Filme", 12.5f, 0xFFBCBEC6.toInt())
+        val cert = certView()
+        val len = text("", 12.5f, 0xFFBCBEC6.toInt())
+        val sc = text("", 12.5f, C.ac, true)
+        r1.addView(kindTv)
+        r1.addView(cert, llp(WRAP, WRAP).apply { marginStart = dp(10) })
+        r1.addView(len, llp(WRAP, WRAP).apply { marginStart = dp(10) })
+        r1.addView(sc, llp(WRAP, WRAP).apply { marginStart = dp(10) })
+        val gen = text("", 12.5f, Color.WHITE, true, 1)
+        val extra = text("", 11.5f, C.ac, false, 1)
+        info.addView(r1)
+        info.addView(gen, llp(MATCH, WRAP).apply { topMargin = dp(7) })
+        info.addView(extra, llp(MATCH, WRAP).apply { topMargin = dp(5) })
+        card.addView(info, llp(MATCH, WRAP))
+
+        val s = scoreOf(it)
+        sc.text = listOfNotNull(if (s > 0) "★ " + String.format(Locale("pt", "BR"), "%.1f", s) else null, if (it.year > 0) it.year.toString() else null).joinToString("   ")
+        val p = Lib.prog(it.key)
+        extra.text = if (Lib.isSeen(it.key)) "✓ Você já assistiu" else if (p != null && p.dur > 0) "Faltam " + fmtDur(p.dur - p.pos) else ""
+        extra.visibility = if (extra.text.isEmpty()) View.GONE else View.VISIBLE
+        fun fillMeta(mi: Discover.MetaInfo?) {
+            setCert(cert, mi?.cert ?: "")
+            len.text = mi?.len ?: ""
+            val g = mi?.genres?.takeIf { l -> l.isNotEmpty() } ?: it.genre.split(",", "/").map { x -> x.trim() }.filter { x -> x.isNotEmpty() }.take(3)
+                .ifEmpty { listOf(Repo.catName(it.kind, it.cat)).filter { x -> x.isNotEmpty() } }
+            gen.text = g.joinToString("  •  ")
+        }
+        fun fillArt(a: Discover.ArtInfo?) {
+            val bd = Art.backdrop(it).ifEmpty { a?.backdrop ?: "" }.ifEmpty { it.icon }
+            if (bd.isNotEmpty()) img.load(bd) { crossfade(200) }
+            val l = a?.logo ?: ""
+            if (l.isNotEmpty()) logo.load(l) {
+                listener(onSuccess = { _, _ -> logo.visibility = View.VISIBLE; ttl.visibility = View.GONE })
             }
-            p = p.parent
         }
-        if (infoItem === it && info.visibility == View.VISIBLE) return
-        infoItem = it
-        fillInfo(it)
-        info.visibility = View.VISIBLE
-        infoJob?.cancel()
-        // detalhes que a lista não traz (duração, sinopse): só se ficar parado na capa
-        if (it.kind == Kind.MOVIE && (it.plot.isEmpty() || !infoDur.containsKey(it.key))) infoJob = lifecycleScope.launch {
-            delay(700)
-            val o = withContext(Dispatchers.IO) { try { Repo.vodInfo(it.id) } catch (e: Exception) { null } } ?: return@launch
-            infoDur[it.key] = o.s("duration").let { d -> fmtInfoDur(d, o.optInt("duration_secs")) }
-            if (it.plot.isEmpty()) it.plot = o.s("plot")
-            if (infoItem === it) fillInfo(it)
+        val mc = Discover.metaCached(it); val ac = Discover.artCached(it)
+        fillMeta(mc); fillArt(ac)
+        if (mc == null || ac == null) lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                (try { Discover.meta(it) } catch (e: Exception) { null }) to (try { Discover.art(it) } catch (e: Exception) { null })
+            }
+            if (pop === card) { if (mc == null) fillMeta(r.first); if (ac == null) fillArt(r.second) }
         }
-    }
 
-    private fun fmtInfoDur(d: String, secs: Int): String {
-        var s = secs
-        if (s <= 0) { val p = d.split(":").mapNotNull { x -> x.trim().toIntOrNull() }; if (p.size == 3) s = p[0] * 3600 + p[1] * 60 + p[2] }
-        if (s <= 0) return ""
-        val h = s / 3600; val mi = (s % 3600) / 60
-        return if (h > 0) "${h}h ${"%02d".format(mi)}min" else "${mi}min"
-    }
-
-    private fun fillInfo(it: Item) {
-        infoTitle.text = it.name
-        val m = ArrayList<String>()
-        scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
-        if (it.year > 0) m.add(it.year.toString())
-        infoDur[it.key]?.takeIf { d -> d.isNotEmpty() }?.let { d -> m.add(d) }
-        if (it.kind == Kind.SERIES) m.add("Série")
-        val g = it.genre.split(",", "/").map { x -> x.trim() }.filter { x -> x.isNotEmpty() }.take(2).joinToString(", ")
-        (g.ifEmpty { Repo.catName(it.kind, it.cat) }).takeIf { x -> x.isNotEmpty() }?.let { x -> m.add(x) }
-        if (Lib.isSeen(it.key)) m.add("✓ Assistido") else Lib.prog(it.key)?.let { p -> m.add("Faltam " + fmtDur(p.dur - p.pos)) }
-        infoMeta.text = m.joinToString("   ·   ")
-        infoPlot.text = it.plot
-        infoPlot.visibility = if (it.plot.isEmpty()) View.GONE else View.VISIBLE
+        // posição: centralizada em cima da capa, sem sair da tela
+        val loc = IntArray(2); v.getLocationInWindow(loc)
+        val rl = IntArray(2); rootF.getLocationInWindow(rl)
+        val cx = loc[0] - rl[0] + (v.width * v.scaleX).toInt() / 2
+        val cy = loc[1] - rl[1] + (v.height * v.scaleY).toInt() / 2
+        val estH = imgH + dp(86)
+        val left = (cx - w / 2).coerceIn(dp(12), maxOf(dp(12), rootF.width - w - dp(12)))
+        val topY = (cy - estH / 2).coerceIn(dp(60), maxOf(dp(60), rootF.height - estH - dp(8)))
+        rootF.addView(card, FrameLayout.LayoutParams(w, WRAP, Gravity.TOP or Gravity.START).apply { leftMargin = left; topMargin = topY })
+        pop = card
+        card.alpha = 0f; card.scaleX = 0.82f; card.scaleY = 0.82f
+        card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170).start()
     }
 
     /* ---------- tirar de "Continuar assistindo" (segurar OK) ---------- */
@@ -415,6 +487,8 @@ class MainActivity : ComponentActivity() {
     private fun render(keepFocus: Boolean) {
         shownVersion = Repo.version
         homeRv = null
+        browseHero = null; browseHeroOpen = true
+        hidePop()
         content.removeAllViews()
         try {
             when (tab) {
@@ -460,8 +534,8 @@ class MainActivity : ComponentActivity() {
     private fun homeView(): View {
         val e = ArrayList<HomeEntry>()
         val movies = Repo.recent(Repo.vod)
-        val heroes = heroCandidates(movies)
-        if (heroes.isNotEmpty()) e.add(HomeEntry.Hero(heroView(heroes)))
+        val heroes = homeHeroes()
+        if (heroes.isNotEmpty()) e.add(HomeEntry.Hero(heroView(heroes, true)))
         val cont = Lib.progs().filter { it.dur > 0 && !Lib.isSeen(it.key) }.take(20)
         if (cont.isNotEmpty()) e.add(HomeEntry.Row("Continuar assistindo", extra = "segure OK para remover", cards = cont.map { p ->
             Card(null, p.name, Kind.MOVIE, p.icon, if (p.sub.isNotEmpty()) p.sub else "Faltam " + fmtDur(p.dur - p.pos), p.pct, onLong = { askRemove(p) }) { resume(p) }
@@ -515,137 +589,190 @@ class MainActivity : ComponentActivity() {
     private fun scoreOf(it: Item): Double = if (it.rating > 0) it.rating else Trend.votes[it.key] ?: 0.0
 
     /**
-     * escolhe os destaques:
-     * 1) filmes em alta nas plataformas que estão na lista, com nota 6,5 ou mais
+     * escolhe os destaques de um tipo (filmes ou séries):
+     * 1) em alta nas plataformas e que estão na lista, com nota 6,5 ou mais
      * 2) se faltar, lançamentos recentes com nota 7 ou mais
      * 3) em último caso, o mais recente com capa
      */
-    private fun heroCandidates(recentMovies: List<Item>): List<Pair<Item, String>> {
+    private fun heroCandidates(kind: Kind, max: Int = 8): List<Pair<Item, String>> {
+        val recent = Repo.recent(Repo.list(kind))
         val out = ArrayList<Pair<Item, String>>()
         val seen = HashSet<String>()
-        val rows = Trend.forKind(Kind.MOVIE)
+        val rows = Trend.forKind(kind)
         for (pos in 0 until 10) {
             rows.forEach { r ->
                 val it = r.items.getOrNull(pos) ?: return@forEach
-                if (it.icon.isNotEmpty() && scoreOf(it) >= 6.5 && seen.add(it.id)) out.add(it to "EM ALTA NA " + r.plat.n.uppercase())
+                if (it.icon.isNotEmpty() && scoreOf(it) >= 6.5 && seen.add(it.id)) out.add(it to "Em alta na " + r.plat.n)
             }
         }
         if (out.size < 3) {
-            recentMovies.take(400).filter { it.icon.isNotEmpty() && it.rating >= 7.0 && it.id !in seen }
-                .sortedByDescending { it.rating }.take(8 - out.size)
-                .forEach { seen.add(it.id); out.add(it to "LANÇAMENTO BEM AVALIADO") }
+            recent.take(400).filter { it.icon.isNotEmpty() && it.rating >= 7.0 && it.id !in seen }
+                .sortedByDescending { it.rating }.take(max - out.size)
+                .forEach { seen.add(it.id); out.add(it to "Achamos que você vai amar isto!") }
         }
-        if (out.isEmpty()) (recentMovies.firstOrNull { it.icon.isNotEmpty() } ?: recentMovies.firstOrNull())?.let { out.add(it to "ADICIONADO RECENTEMENTE") }
-        val top = out.take(8)
+        if (out.isEmpty()) (recent.firstOrNull { it.icon.isNotEmpty() } ?: recent.firstOrNull())?.let { out.add(it to "Adicionado recentemente") }
+        val top = out.take(max)
         if (top.size <= 1) return top
         // começa num destaque diferente a cada vez que abre
         val start = (System.currentTimeMillis() / 1000 % top.size).toInt()
         return top.drop(start) + top.take(start)
     }
 
+    /** destaques do Início: filmes e algumas séries misturados */
+    private fun homeHeroes(): List<Pair<Item, String>> {
+        val mv = heroCandidates(Kind.MOVIE, 6)
+        val sr = heroCandidates(Kind.SERIES, 2)
+        val out = ArrayList<Pair<Item, String>>()
+        var i = 0; var j = 0
+        while (i < mv.size || j < sr.size) {
+            if (i < mv.size) out.add(mv[i++])
+            if (i < mv.size) out.add(mv[i++])
+            if (i < mv.size) out.add(mv[i++])
+            if (j < sr.size) out.add(sr[j++])
+        }
+        return out
+    }
+
     private var heroTimer: Runnable? = null
 
-    private fun heroView(list: List<Pair<Item, String>>): View {
-        val f = FrameLayout(this).apply { layoutParams = ViewGroup.LayoutParams(MATCH, dp(300)); tag = "hero" }
-        val bd = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0.45f }
-        f.addView(bd, FrameLayout.LayoutParams(MATCH, MATCH).apply { marginStart = dp(260) })
+    /** destaque do topo: cartão arredondado com a imagem larga, logo oficial, dados e botões */
+    private fun heroView(list: List<Pair<Item, String>>, big: Boolean): View {
+        val outer = FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(MATCH, dp(if (big) 318 else 232)); tag = "hero"
+            setPadding(dp(40), dp(4), dp(40), dp(if (big) 14 else 10))
+        }
+        val f = FrameLayout(this).apply {
+            background = rounded(C.bg3, dpf(14f))
+            clipToOutline = true
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+        }
+        outer.addView(f, FrameLayout.LayoutParams(MATCH, MATCH))
+        val bd = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        f.addView(bd, FrameLayout.LayoutParams(MATCH, MATCH))
         f.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(C.bg, C.bg, 0xCC0A0B0F.toInt(), 0x000A0B0F))
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xF00A0B0F.toInt(), 0xB30A0B0F.toInt(), 0x330A0B0F, 0x000A0B0F))
         }, FrameLayout.LayoutParams(MATCH, MATCH))
-        f.addView(View(this).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(C.bg, 0x000A0B0F)) }, FrameLayout.LayoutParams(MATCH, dp(90), Gravity.BOTTOM))
+        f.addView(View(this).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xCC0A0B0F.toInt(), 0x000A0B0F)) }, FrameLayout.LayoutParams(MATCH, dp(120), Gravity.BOTTOM))
+        // capa em pé (só quando não existe imagem larga)
         val poster = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = rounded(C.bg3, dpf(10f)); clipToOutline = true
             outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
-            elevation = dpf(12f)
+            elevation = dpf(12f); visibility = View.GONE
         }
-        f.addView(poster, FrameLayout.LayoutParams(dp(150), dp(225), Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(70) })
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM; setPadding(dp(40), 0, 0, dp(18)) }
-        val tag = text("", 11f, C.ac, true).apply { letterSpacing = 0.1f }
-        col.addView(tag)
-        val title = text("", 36f, Color.WHITE, true, 2).apply { setLineSpacing(0f, 0.95f) }
-        col.addView(title, llp(dp(520), WRAP).apply { topMargin = dp(8) })
+        val ph = if (big) 230 else 160
+        f.addView(poster, FrameLayout.LayoutParams(dp(ph * 2 / 3), dp(ph), Gravity.END or Gravity.CENTER_VERTICAL).apply { marginEnd = dp(60) })
+        // selo do canto (ex.: "Em alta na Netflix", "Achamos que você vai amar isto!")
+        val chip = text("", 12f, Color.WHITE, true).apply {
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = rounded(0xB3101114.toInt(), dpf(6f))
+        }
+        f.addView(chip, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(18), dp(if (big) 22 else 16)) })
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM; setPadding(dp(30), 0, 0, dp(if (big) 20 else 14)) }
+        val title = text("", if (big) 34f else 26f, Color.WHITE, true, 2).apply { setLineSpacing(0f, 0.95f) }
+        col.addView(title, llp(dp(520), WRAP))
         // logo oficial do título (TMDB), no lugar do nome escrito quando existe
         val logo = ImageView(this).apply { adjustViewBounds = true; scaleType = ImageView.ScaleType.FIT_START; visibility = View.GONE }
-        col.addView(logo, llp(dp(400), dp(96)).apply { topMargin = dp(8) })
-        val meta = text("", 13f, 0xFFD4D6DC.toInt())
-        col.addView(meta, llp(WRAP, WRAP).apply { topMargin = dp(10) })
-        val plot = text("", 13f, 0xFFC3C6CE.toInt(), false, 3).apply { setLineSpacing(0f, 1.25f) }
-        col.addView(plot, llp(dp(480), WRAP).apply { topMargin = dp(10) })
+        col.addView(logo, llp(dp(if (big) 380 else 300), dp(if (big) 100 else 70)))
+        val metaRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val meta = text("", 13.5f, Color.WHITE, true)
+        val cert = certView()
+        metaRow.addView(meta)
+        metaRow.addView(cert, llp(WRAP, WRAP).apply { marginStart = dp(10) })
+        col.addView(metaRow, llp(WRAP, WRAP).apply { topMargin = dp(if (big) 12 else 8) })
+        val plot = text("", if (big) 14f else 12.5f, 0xFFE6E7EA.toInt(), false, if (big) 3 else 2).apply { setLineSpacing(0f, 1.2f) }
+        col.addView(plot, llp(dp(if (big) 520 else 560), WRAP).apply { topMargin = dp(if (big) 10 else 6) })
         val dots = text("", 12f, C.tx3)
         var idx = 0
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         btns.addView(button("▶  Assistir", true) {
             val it = list[idx].first
-            startActivity(Intent(this, PlayerActivity::class.java).putExtra("mode", "movie").putExtra("id", it.id).putExtra("ext", it.ext)
+            if (it.kind == Kind.SERIES) open(it)
+            else startActivity(Intent(this, PlayerActivity::class.java).putExtra("mode", "movie").putExtra("id", it.id).putExtra("ext", it.ext)
                 .putExtra("title", it.name).putExtra("key", it.key).putExtra("icon", it.icon).putExtra("name", it.name)
                 .putExtra("plot", it.plot).putExtra("img", Art.backdrop(it)))
         })
         btns.addView(button("ⓘ  Mais informações") { open(list[idx].first) }, llp(WRAP, WRAP).apply { marginStart = dp(12) })
-        btns.addView(button("Sortear filme") {
+        if (big) btns.addView(button("Sortear filme") {
             val pick = Discover.randomPick()
             if (pick == null) Toast.makeText(this, "Nenhum filme para sortear", Toast.LENGTH_SHORT).show()
             else { Toast.makeText(this, "Que tal: " + pick.name + "?", Toast.LENGTH_SHORT).show(); open(pick) }
         }, llp(WRAP, WRAP).apply { marginStart = dp(12) })
         btns.addView(dots, llp(WRAP, WRAP).apply { marginStart = dp(18) })
-        col.addView(btns, llp(WRAP, WRAP).apply { topMargin = dp(16) })
+        col.addView(btns, llp(WRAP, WRAP).apply { topMargin = dp(if (big) 14 else 10) })
         f.addView(col, FrameLayout.LayoutParams(MATCH, MATCH))
 
         fun showHero(i: Int) {
             idx = i
             val (it, label) = list[i]
-            tag.text = "FILME · $label"
+            chip.text = label
             title.text = it.name
+            title.visibility = View.VISIBLE; logo.visibility = View.GONE
             fun showLogo(url: String) {
-                if (url.isEmpty()) { logo.visibility = View.GONE; title.visibility = View.VISIBLE; return }
+                if (url.isEmpty()) return
                 logo.load(url) {
                     crossfade(250)
                     listener(onSuccess = { _, _ -> if (idx == i) { logo.visibility = View.VISIBLE; title.visibility = View.GONE } },
                         onError = { _, _ -> logo.visibility = View.GONE; title.visibility = View.VISIBLE })
                 }
             }
+            fun showBd(wide: String) {
+                if (wide.isNotEmpty()) { bd.alpha = 1f; bd.load(wide) { crossfade(400) }; poster.visibility = View.GONE }
+                else {
+                    bd.alpha = 0.35f
+                    if (it.icon.isNotEmpty()) { bd.load(it.icon) { crossfade(400) }; poster.load(it.icon) { crossfade(400) }; poster.visibility = View.VISIBLE }
+                    else { bd.setImageDrawable(null); poster.visibility = View.GONE }
+                }
+            }
+            fun showMeta(mi: Discover.MetaInfo?) {
+                val m = ArrayList<String>()
+                m.add(if (it.kind == Kind.SERIES) "Série" else "Filme")
+                val g = mi?.genres?.firstOrNull() ?: it.genre.split(",", "/").map { x -> x.trim() }.firstOrNull { x -> x.isNotEmpty() } ?: Repo.catName(it.kind, it.cat)
+                if (!g.isNullOrEmpty()) m.add(g)
+                if (it.year > 0) m.add(it.year.toString())
+                mi?.len?.takeIf { x -> x.isNotEmpty() }?.let { x -> m.add(x) }
+                scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
+                meta.text = m.joinToString("  •  ")
+                setCert(cert, mi?.cert ?: "")
+            }
             val cached = Discover.artCached(it)
+            val mc = Discover.metaCached(it)
             showLogo(cached?.logo ?: "")
-            val m = ArrayList<String>()
-            scoreOf(it).takeIf { s -> s > 0 }?.let { s -> m.add("★ " + String.format(Locale("pt", "BR"), "%.1f", s)) }
-            if (it.year > 0) m.add(it.year.toString())
-            Repo.catName(Kind.MOVIE, it.cat).takeIf { c -> c.isNotEmpty() }?.let { c -> m.add(c) }
-            meta.text = m.joinToString("   ")
+            showBd(Art.backdrop(it).ifEmpty { cached?.backdrop ?: "" })
+            showMeta(mc)
             plot.text = it.plot
-            // fundo: imagem larga oficial quando tem, senão a capa
-            val wideBd = Art.backdrop(it).ifEmpty { cached?.backdrop ?: "" }
-            bd.alpha = if (wideBd.isNotEmpty()) 0.6f else 0.45f
-            val bdUrl = wideBd.ifEmpty { it.icon }
-            if (bdUrl.isNotEmpty()) bd.load(bdUrl) { crossfade(400) } else bd.setImageDrawable(null)
-            if (it.icon.isNotEmpty()) { poster.load(it.icon) { crossfade(400) }; poster.visibility = View.VISIBLE } else poster.visibility = View.GONE
-            if (cached == null) lifecycleScope.launch {
-                val a = withContext(Dispatchers.IO) { try { Discover.art(it) } catch (e: Exception) { null } }
-                if (a != null && idx == i) {
-                    showLogo(a.logo)
-                    if (wideBd.isEmpty() && a.backdrop.isNotEmpty()) { bd.alpha = 0.6f; bd.load(a.backdrop) { crossfade(400) } }
+            if (cached == null || mc == null) lifecycleScope.launch {
+                val r = withContext(Dispatchers.IO) {
+                    (if (cached == null) (try { Discover.art(it) } catch (e: Exception) { null }) else cached) to
+                        (if (mc == null) (try { Discover.meta(it) } catch (e: Exception) { null }) else mc)
+                }
+                if (idx == i) {
+                    r.first?.let { a -> if (cached == null) { showLogo(a.logo); showBd(Art.backdrop(it).ifEmpty { a.backdrop }) } }
+                    if (mc == null) showMeta(r.second)
                 }
             }
             dots.text = if (list.size > 1) list.indices.joinToString(" ") { d -> if (d == i) "●" else "○" } else ""
-            if (it.plot.isEmpty()) lifecycleScope.launch {
+            if (it.plot.isEmpty() && it.kind == Kind.MOVIE) lifecycleScope.launch {
                 val p = withContext(Dispatchers.IO) { try { Repo.vodInfo(it.id).s("plot") } catch (e: Exception) { "" } }
                 if (p.isNotEmpty()) { it.plot = p; if (idx == i) plot.text = p }
             }
         }
         showHero(0)
-        lifecycleScope.launch(Dispatchers.IO) { list.forEach { (x, _) -> try { if (Discover.artCached(x) == null) Discover.art(x) } catch (e: Exception) {} } }
+        lifecycleScope.launch(Dispatchers.IO) {
+            list.forEach { (x, _) -> try { if (Discover.artCached(x) == null) Discover.art(x); if (Discover.metaCached(x) == null) Discover.meta(x) } catch (e: Exception) {} }
+        }
         // troca o destaque sozinho a cada 12 segundos
-        heroTimer?.let { f.removeCallbacks(it) }
         if (list.size > 1) {
             val r = object : Runnable {
                 override fun run() {
-                    if (f.isAttachedToWindow && f.isShown) showHero((idx + 1) % list.size)
-                    f.postDelayed(this, 12000)
+                    if (outer.isAttachedToWindow && outer.isShown) showHero((idx + 1) % list.size)
+                    outer.postDelayed(this, 12000)
                 }
             }
             heroTimer = r
-            f.postDelayed(r, 12000)
+            outer.postDelayed(r, 12000)
         }
-        return f
+        return outer
     }
 
     /* ---------- Ao vivo / Filmes / Séries ---------- */
@@ -737,7 +864,17 @@ class MainActivity : ComponentActivity() {
             }
         }
         pick(current, false)
-        return row
+        if (kind == Kind.LIVE) return row
+        val heroes = heroCandidates(kind)
+        if (heroes.isEmpty()) return row
+        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val hero = heroView(heroes, false)
+        browseHeroH = hero.layoutParams.height
+        wrap.addView(hero, llp(MATCH, browseHeroH))
+        wrap.addView(row, llp(MATCH, 0, 1f))
+        browseHero = hero
+        browseHeroOpen = true
+        return wrap
     }
 
     private fun showEpg(box: TextView, it: Item) {
